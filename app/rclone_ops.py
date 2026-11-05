@@ -396,28 +396,67 @@ class AuthorizeSession:
                     self.status = "done" if rc == 0 else "error"
 
     def _capture_token_section(self) -> None:
-        """Capture the config block (token) from accumulated lines.
+        """Build the ``[provider]`` config section from accumulated stdout.
 
-        ``rclone authorize drive`` prints the section as ``[drive]`` (backend
-        name), not ``[gdrive]`` (remote name) — accept both, and normalize the
-        header to the provider (remote) name used across the app.
+        PRIMARY contract (rclone >= 1.55, confirmed against v1.75.2 source,
+        fs/config/authorize.go): after a successful exchange rclone prints
+        ONLY the raw token JSON between banners::
+
+            Paste the following into your remote machine --->
+            {"access_token":"...","refresh_token":"...", ...}
+            <---End paste
+
+        Legacy/alternate INI form (``[drive] ... token = {...}``) is also
+        accepted as fallback.  In all cases the section header is normalized
+        to the provider (remote) name used across the app.
         """
         with self._lock:
             lines = list(self._lines)
-        headers = {f"[{self.provider}]", f"[{PROVIDER_META[self.provider]['rclone_type']}]"}
-        started = False
-        captured: List[str] = []
+
+        rclone_type = PROVIDER_META[self.provider]["rclone_type"]
+        token_json: Optional[str] = None
+
+        # -- primary: banner-delimited JSON blob --
+        in_blob = False
+        collected: List[str] = []
         for line in lines:
-            if line.strip() in headers:
-                started = True
-                captured.append(f"[{self.provider}]")
+            if not in_blob:
+                if line.rstrip().endswith("--->") and "Paste the following" in line:
+                    in_blob = True
                 continue
-            if started:
-                if line.strip() == "" or line.strip().startswith("["):
+            if "<---End paste" in line:
+                break
+            collected.append(line.strip())
+        blob = "".join(collected).strip()
+        if blob.startswith("{") and blob.endswith("}"):
+            token_json = blob
+
+        # -- fallback: legacy INI section --
+        if token_json is None:
+            headers = {f"[{self.provider}]", f"[{rclone_type}]"}
+            started = False
+            ini: List[str] = []
+            for line in lines:
+                if line.strip() in headers:
+                    started = True
+                    continue
+                if started:
+                    if line.strip() == "" or line.strip().startswith("["):
+                        break
+                    ini.append(line)
+            for ln in ini:
+                if ln.strip().startswith("token"):
+                    token_json = ln.split("=", 1)[1].strip()
                     break
-                captured.append(line)
-        if started and captured:
-            self.token_section = "\n".join(captured)
+            else:
+                token_json = None
+
+        if token_json:
+            self.token_section = (
+                f"[{self.provider}]\n"
+                f"type = {rclone_type}\n"
+                f"token = {token_json}\n"
+            )
             with self._lock:
                 self.status = "done"
 
