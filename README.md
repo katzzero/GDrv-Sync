@@ -113,6 +113,24 @@ On the Connect page, open the Advanced box ("Avançado") to set your own client_
 These are written only to `/data/rclone.conf` (the volume), never to
 `settings.json`.
 
+## Bring your own client_id (Google Drive 2026 retirement)
+
+Google is retiring rclone's shared Drive client_id in 2026. To keep connecting
+Google Drive with your own OAuth app credentials:
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) → create/select a project.
+2. **Enable the Google Drive API** for that project (APIs & Services → Library → Google Drive API).
+3. **OAuth consent screen**: set User Type to **External**, add your email as a test user, finish the required fields.
+4. **Credentials → Create credentials → OAuth client ID** → application type **Desktop app**.
+5. Under **Authorized redirect URIs**, add BOTH:
+   - `http://localhost:53682/`
+   - `http://127.0.0.1:53682/`
+6. Copy the **Client ID** and **Client Secret**.
+7. On the gdrv-sync Connect page, open the Google Drive "Avançado" box, paste client_id/secret, and click **🔗 Conectar** (Reconnect if already connected).
+8. The credentials are written only to `./data/rclone.conf` (the volume) — keep that volume private; it is already gitignored.
+
+Reference: https://rclone.org/drive/#making-your-own-client-id
+
 ### Plan B - rclone GUI
 
 For a no-code alternative, run the official rclone GUI:

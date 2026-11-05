@@ -18,28 +18,37 @@
                         {{ 'Conectado' if state[provider].connected else '🔗 Conectar' }}
                     </button>
                 </div>
-                {% if provider == 'dropbox' %}
+                <!-- Advanced box: now for ALL THREE providers (was dropbox-only). -->
                 <details class="adv show" style="margin-top:10px">
-                    <summary>Avançado — client_id / client_secret próprios <span>(opcional; recomendado em uso pesado)</span></summary>
+                    <summary>Avançado — client_id / client_secret próprios <span>{{ providers[provider].client_id_note }}</span></summary>
                     <div class="row" style="margin-top:8px">
-                        <input type="text" placeholder="client_id">
-                        <input type="password" placeholder="client_secret">
+                        <input type="text" id="cid-{{ provider }}" placeholder="client_id">
+                        <input type="password" id="csec-{{ provider }}" placeholder="client_secret">
                     </div>
+                    {% if providers[provider].redirect_note %}
+                    <div style="font-size:11px;color:var(--warn);margin-top:6px">
+                        {{ providers[provider].redirect_note }}
+                    </div>
+                    {% endif %}
                     <div style="font-size:11px;color:var(--muted);margin-top:6px">Gravados somente em /data/rclone.conf (volume), nunca em settings.json.</div>
                 </details>
-                {% endif %}
                 <ul class="connect-steps" id="steps-{{ provider }}" style="margin-top:12px;display:none">
-                    <li><div class="ic">›</div><div>Inicia <code>rclone authorize {{ provider }} --port 53682</code> no container</div></li>
-                    <li><div class="ic">›</div><div>Abre o login do {{ provider }} no navegador (callback → <code>localhost:53682</code>)</div></li>
+                    <li><div class="ic">›</div><div>Inicia <code>rclone authorize {{ providers[provider].rclone_type }}</code> no container (com client_id/secret quando preenchidos)</div></li>
+                    <li><div class="ic">›</div><div>Abre o login do {{ labels[provider] }} no navegador (callback → <code>localhost:53682</code>)</div></li>
                     <li><div class="ic">›</div><div>Você autoriza o acesso</div></li>
                     <li><div class="ic">›</div><div>Token capturado e gravado em <code>/data/rclone.conf</code> (seção <code>{{ provider }}</code>)</div></li>
                     <li><div class="ic">›</div><div>Valida com <code>rclone lsd {{ provider }}:</code></div></li>
                 </ul>
                 <div id="manual-{{ provider }}" style="display:none;margin-top:10px;font-size:12px;color:var(--muted)"></div>
-                <div id="ok-{{ provider }}" style="display:none;margin-top:10px;color:var(--ok);font-weight:600">✅ {{ provider }} conectado.</div>
+                <div id="ok-{{ provider }}" style="display:none;margin-top:10px;color:var(--ok);font-weight:600">✅ {{ labels[provider] }} conectado.</div>
             </div>
             {% endfor %}
         </div>
+    </div>
+    <div class="note" style="margin-top:14px;padding:10px 14px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;font-size:12px;color:var(--muted)">
+        <b>URIs de redirect a registrar no seu app OAuth (Google Cloud Console → credenciais → cliente desktop):</b><br>
+        http://localhost:53682/  e  http://127.0.0.1:53682/<br>
+        <a href="https://rclone.org/drive/#making-your-own-client-id" target="_blank" style="color:var(--accent)">rclone: making your own client ID</a>
     </div>
 </section>
 <script>
@@ -50,6 +59,9 @@ let pollStart = {};      // provider -> start timestamp (ms)
 const POLL_INTERVAL = 1500;  // ms
 const POLL_TIMEOUT = 180000; // ms (~180s) then cancel
 
+function _cidInput(p){ return document.getElementById('cid-'+p); }
+function _csecInput(p){ return document.getElementById('csec-'+p); }
+
 async function startConnect(p, btn){
   btn.disabled = true; btn.textContent = 'Conectando…';
   const steps = document.getElementById('steps-'+p);
@@ -57,10 +69,16 @@ async function startConnect(p, btn){
   const lis = steps.querySelectorAll('li');
   lis.forEach(li=>li.className='');
 
+  const cidIn = _cidInput(p);
+  const csecIn = _csecIn(p);
+  const body = {provider: p};
+  if(cidIn && cidIn.value.trim()!=='') body.client_id = cidIn.value.trim();
+  if(csecIn && csecIn.value.trim()!=='') body.client_secret = csecIn.value.trim();
+
   try{
     const r = await fetch('/api/connect/start',{
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({provider: p})
+      body: JSON.stringify(body)
     });
     const j = await r.json();
     if(j.auth_url){
@@ -84,7 +102,6 @@ async function startConnect(p, btn){
               a.textContent = 'link de autorização';
               hint.textContent = 'Abra este link para autorizar: ';
               hint.appendChild(a); hint.style.display = 'block';
-              hint.style.display = 'block';
             }
           }
         }
@@ -150,6 +167,9 @@ async function pollConnect(){
         btn.textContent='Conectado'; btn.className='btn ghost'; btn.disabled=true;
         okDiv.style.display='block';
         document.getElementById('steps-'+p).querySelectorAll('li').forEach(li=>li.className='done');
+        // After successful connect, clear the secret input from the DOM (never linger).
+        const csecIn = _csecIn(p);
+        if(csecIn) csecIn.value = '';
       } else if(j.status === 'error'){
         stopPolling(p);
         badge.className='badge off'; badge.textContent='não conectado';

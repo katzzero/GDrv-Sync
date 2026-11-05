@@ -105,14 +105,16 @@ O `rclone sync` puro (que deleta extras no destino) **não é mais o padrão**. 
 
 Fluxo `POST /connect` (com `provider` no body) → página de progresso:
 1. App dispara `rclone authorize <backend>` (backend = `drive`/`dropbox`/`onedrive` via `providers.rclone_type`; **não existe flag `--port`** — o rclone escuta sempre em `127.0.0.1:53682` dentro do container, com `--auth-no-open-browser --config /data/rclone.conf`), stdout em modo linha via thread.
+   - **client_id/client_secret (Avançado)**: quando ambos são informados no body de `/api/connect/start`, são passados como **argumentos positionais** a `rclone authorize <backend> <cid> <csec>` (ambos obrigatórios juntos, senão 400). Gravados como `client_id =` / `client_secret =` dentro da seção do provedor em `/data/rclone.conf` — **somente lá**, nunca em settings.json nem em respostas/logs.
 2. Extrai a URL **com `state=`** do stdout (ignora o aviso de "Redirect URL") → **abre em nova aba do browser do usuário**.
 3. Usuário loga → callback cai em `localhost:53682` do host → **proxy TCP interno** (`app/callback_proxy.py`, porta 53683 publicada) encaminha ao loopback do container onde o rclone escuta (docker publishing não alcança listeners de loopback do container).
-4. O rclone imprime o token blob no stdout (seção `[drive]` etc.) → app captura, **normaliza o header para o nome do remote** (`[gdrive]`) e grava em `/data/rclone.conf` atomicamente.
+4. O rclone imprime o token blob no stdout (seção `[drive]` etc.) → app captura, **normaliza o header para o nome do remote** (`[gdrive]`) e grava em `/data/rclone.conf` atomicamente (com `client_id =` / `client_secret =` quando houver credenciais customizadas).
 5. UI verifica via `section_present` (file-based, sem subprocess por poll) → mostra ✅ Conectado ou erro.
 
 Por provider:
-- **gdrive / onedrive**: client_id embutido do rclone funciona out-of-the-box.
+- **gdrive**: client_id embutido do rclone funciona out-of-the-box, mas o client_id compartilhado será **aposentado em 2026** → a UI mostra a box "Avançado" para todos os provedores (label gdrive: "recomendado — … aposentado em 2026").
 - **dropbox**: funciona out-of-the-box, mas o client embutido é compartilhado/rate-limited → a UI mostra campos **opcionalais "Avançado"** (`client_id`/`client_secret`) recomendados para uso pesado.
+- **onedrive**: opcional.
 - Campos Avançado valem para qualquer provider (upgrade documentado); **Box** fica fora da v1 justamente por exigir client próprio.
 - **UI da aba Conectar**: 3 blocos empilhados (um por provedor, ordem fixa Google Drive / Dropbox / OneDrive), cada um com status próprio, botão "Conectar" e lista de passos inline — sem dropdown de troca. Autorização de um provedor não afeta os demais.
 - Sem copiar/colar pelo usuário. README documenta service-account (Drive) e client_id próprio como upgrades.

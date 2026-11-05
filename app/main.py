@@ -491,9 +491,24 @@ async def connect_start(request: Request):
     data = await request.json()
     provider = validate_provider(data.get("provider"))
 
+    # Optional client_id/client_secret (bring-your-own OAuth app credentials).
+    # If one is given without the other -> 400.  Never log them.
+    client_id = data.get("client_id")
+    client_secret = data.get("client_secret")
+    has_cid = client_id is not None and str(client_id).strip() != ""
+    has_csec = client_secret is not None and str(client_secret).strip() != ""
+    if has_cid != has_csec:
+        return JSONResponse(
+            {"ok": False, "error": "both_required",
+             "detail": "client_id e client_secret devem ser informados juntos (Avançado)."},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
     # rclone authorize listens ONLY on 53682 (no --port flag); keep constant.
     port = 53682
-    sess = authorize_start(provider, port)
+    sess = authorize_start(provider, port,
+                           client_id=(str(client_id).strip() if has_cid else None),
+                           client_secret=(str(client_secret).strip() if has_csec else None))
     # Run the blocking wait in a threadpool so the event loop isn't blocked up to 60s (M11).
     got_url = await asyncio.to_thread(sess.wait_for_url, 60)
 

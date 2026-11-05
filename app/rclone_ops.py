@@ -183,11 +183,14 @@ def _redact(lines: List[str]) -> List[str]:
 
     Covers both INI-style ``token =`` lines and the raw JSON blob printed by
     ``rclone authorize`` between the Paste/End-paste banners (access_token /
-    refresh_token keys).
+    refresh_token keys).  Also drops ``client_secret =`` lines so the secret
+    never leaks in error outputs / API responses / logs.
     """
     out: List[str] = []
     for line in lines:
         if re.match(r"^\s*token\s*=", line, re.I):
+            continue
+        if re.match(r"^\s*client_secret\s*=", line, re.I):
             continue
         if re.search(r"access_token|refresh_token|\"expiry\"", line, re.I):
             continue
@@ -539,9 +542,23 @@ class AuthorizeSession:
     ``/data/rclone.conf``.
     """
 
-    def __init__(self, provider: str, port: int = 53682):
+    def __init__(self, provider: str, port: int = 53682,
+                 client_id: Optional[str] = None, client_secret: Optional[str] = None):
         self.provider = provider
         self.port = port
+        # client_id/client_secret are passed positionally to `rclone authorize`
+        # only when BOTH are provided (non-empty).  Stored here so the write path
+        # can append client_id = / client_secret = lines to the persisted section.
+        self.client_id: Optional[str] = None
+        self.client_secret: Optional[str] = None
+        if client_id is not None or client_secret is not None:
+            # Require both together; validate non-empty and strip whitespace.
+            cid = (client_id or "").strip()
+            csec = (client_secret or "").strip()
+            if not cid or not csec:
+                raise ValueError("client_id and client_secret must be provided together (both non-empty)")
+            self.client_id = cid
+            self.client_secret = csec
         self.proc: Optional[subprocess.Popen] = None
         self._reader: Optional[threading.Thread] = None
         self._lock = threading.Lock()
@@ -569,6 +586,10 @@ class AuthorizeSession:
             "--auth-no-open-browser",
             "--config", str(RCLONE_CONF),
         ]
+        # client_id + client_secret are POSITIONAL args to `rclone authorize`
+        # (backend [client_id client_secret]); pass only when BOTH are set.
+        if self.client_id is not None and self.client_secret is not None:
+            cmd += [self.client_id, self.client_secret]
         self.proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -675,11 +696,18 @@ class AuthorizeSession:
                 token_json = None
 
         if token_json:
-            self.token_section = (
+            section = (
                 f"[{self.provider}]\n"
                 f"type = {rclone_type}\n"
                 f"token = {token_json}\n"
             )
+            # When custom OAuth credentials were provided, persist them inside
+            # the provider section (after the token line) — this is how rclone
+            # stores them.  They stay ONLY in rclone.conf (the volume).
+            if self.client_id is not None and self.client_secret is not None:
+                section += f"client_id = {self.client_id}\n"
+                section += f"client_secret = {self.client_secret}\n"
+            self.token_section = section
             with self._lock:
                 self.status = "done"
 
@@ -749,11 +777,14 @@ _authorize_sessions: Dict[str, AuthorizeSession] = {}
 _sessions_lock = threading.Lock()
 
 
-def authorize_start(provider: str, port: int = 53682) -> AuthorizeSession:
+def authorize_start(provider: str, port: int = 53682,
+                    client_id: Optional[str] = None, client_secret: Optional[str] = None) -> AuthorizeSession:
     """Start (or reuse) an authorize session for ``provider``.
 
     If an existing session is finished (terminal), replace it with a fresh
-    one so re-Connect always re-initiates the flow.
+    one so re-Connect always re-initiates the flow.  Threads optional
+    client_id/client_secret through to the session (both required together;
+    passed as positional args to `rclone authorize`).
     """
     with _sessions_lock:
         sess = _authorize_sessions.get(provider)
@@ -761,7 +792,7 @@ def authorize_start(provider: str, port: int = 53682) -> AuthorizeSession:
             _authorize_sessions.pop(provider, None)
             sess = None
         if sess is None:
-            sess = AuthorizeSession(provider, port)
+            sess = AuthorizeSession(provider, port, client_id=client_id, client_secret=client_secret)
             _authorize_sessions[provider] = sess
         if sess.proc is None:
             sess.start()
