@@ -129,11 +129,29 @@ docker run -p 5522:5522 -p 5533:5533 rclone/rclone:latest gui --addr 0.0.0.0:552
 - `GET /browse?provider=&path=` - Provider folder picker (breadcrumb + root)
 - `GET /healthz` - Health check (JSON; 503 when rclone missing or any enabled provider has 3+ consecutive failures)
 - `GET /api/settings` - Current settings
-- `POST /api/settings` - Save provider settings (rejects `enabled=true` when not authenticated)
+- `POST /api/settings` - Save provider settings (rejects `enabled=true` when not authenticated; `mirror=true` requires `confirm_mirror=true` and is rejected for `direction=bisync`)
+- `POST /api/preview` - Dry-run preview of the exact effective command (+ `--dry-run`), read-only, never mutates
 - `POST /api/connect/start` - Start OAuth flow (returns `auth_url`)
 - `GET /api/connect/status?provider=` - OAuth connection status
 - `POST /api/connect/cancel` - Cancel an in-flight authorize
+- `POST /api/connect/complete` - Server-side completion: persist captured token to rclone.conf
 - `POST /api/run-now` - Enqueue a priority sync run
+
+## Safety / Non-destructive by default
+
+**Nothing is ever deleted by default, in either direction.**
+
+- **Default (no mirror):** both upload and download run `rclone copy` (never `rclone sync`). `copy` never removes anything from the destination, so neither the cloud nor the local folder can lose files.
+  - upload: `rclone copy /sync/<sub> <remote>`
+  - download: `rclone copy <remote> /sync/<sub>`
+- **Bisync:** `rclone bisync ... --conflict-resolve none` — on conflict the run aborts, no side wins. First-run `--resync` and `--check-access` defaults are unchanged.
+- **Mirror mode (opt-in per provider, `mirror: false` default):** only when you explicitly opt in does the app run `rclone sync` + `--backup-dir`, so destination-only files are *moved* to a backup folder instead of hard-deleted:
+  - upload → cloud backup-dir `<provider>:.gdrv-deleted/<UTC-YYYYMMDD-HHMMSS>` at the **provider root** (a sibling of the destination, never inside it — rclone rejects an overlapping backup-dir). Mirror + upload **to the drive root is blocked (HTTP 400)** because there would be nowhere to keep the backup.
+  - download → local backup-dir `/data/deleted/<provider>/<UTC-ts>` (visible in the host `./data` volume).
+  - Mirror is **not allowed for bisync** (the UI hides it; the API rejects it with 400) because bisync is already bidirectional and mirror would double the risk.
+- **Confirmation guard:** saving `mirror=true` via `POST /api/settings` requires body field `confirm_mirror=true`; otherwise the API returns `400 {"ok":false,"error":"confirm_required",...}`. An extra warning appears when the remote is the provider root (`<provider>:`) with mirror+upload, since the whole cloud drive becomes the destination.
+- **Dry-run preview:** every provider tab has a "🔍 Prévia (dry-run)" button that calls `POST /api/preview`, builds the exact effective command (mirror/backup-dir/bisync first-run included) plus `--dry-run`, runs it via rclone with a 120s timeout, and returns transfer/deletion counts plus the command lines. Nothing is ever mutated; a log is written to `/data/logs/preview-<provider>-<ts>.log`. Rows showing `Deleted:` are highlighted in red with a note pointing to the mirror/backup behavior.
+- The scheduler computes a fresh backup-dir timestamp per run and records the mode (`copy` vs `sync+backup` vs `bisync`) in each `RunRecord`/log line.
 
 ## Health Check
 

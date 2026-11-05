@@ -95,7 +95,7 @@ function selectHere(){
     const remote = PROVIDER + ':' + currentPath;
     // Notify opener (settings page) of the chosen remote, then close.
     if (window.opener && !window.opener.closed) {
-        window.opener.postMessage({gdSync: "browse-selected", provider: PROVIDER, remote: remote}, "*");
+        window.opener.postMessage({gdSync: "browse-selected", provider: PROVIDER, remote: remote}, window.location.origin);
         window.close();
     } else {
         // Fallback: tell settings via query param on the same origin (L4: use /, not /settings).

@@ -17,9 +17,10 @@ from .providers import PROVIDERS
 from .rclone_ops import (
     version as rclone_version,
     lsd, check_connected, ensure_dirs, section_present, invalidate_section_cache,
-    RCLONE_CONF, LOGS_DIR,
+    RCLONE_CONF, LOGS_DIR, DATA_DIR, SYNC_DIR,
     authorize_start, authorize_finish, authorize_cancel, authorize_remove, write_rclone_section,
     get_authorize_session,
+    preview,
 )
 from .callback_proxy import start_callback_proxy
 from .scheduler import scheduler, SETTINGS_PATH
@@ -196,7 +197,9 @@ async def browse_page(request: Request, provider: str = "", path: str = ""):
     folders = []
     error = None
     if connected:
-        rc, dirs, err = lsd(provider, path)
+        # lsd hits the provider API (1-3s+); run it off the event loop,
+        # otherwise every popup navigation freezes ALL pages/tabs.
+        rc, dirs, err = await asyncio.to_thread(lsd, provider, path)
         if rc != 0:
             error = err
         else:
@@ -268,12 +271,44 @@ async def api_save_settings(request: Request):
     interval_min = parse_interval(data.get("interval_min", 5))
     remote = normalize_remote(provider, data.get("remote"))
 
+    mirror = bool(data.get("mirror", False))
+    confirm_mirror = bool(data.get("confirm_mirror", False))
+
+    # Mirror guard: mirror=true requires confirm_mirror=true.
+    if mirror and not confirm_mirror:
+        return JSONResponse(
+            {"ok": False, "error": "confirm_required",
+             "detail": "Ative a confirmação 'Entendo e quero ativar' antes de salvar o modo espelho."},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Mirror is not allowed for bisync (bidirectional already; mirror adds risk).
+    if mirror and direction == "bisync":
+        return JSONResponse(
+            {"ok": False, "error": "mirror_not_allowed_for_bisync",
+             "detail": "Modo espelho não é permitido em direção Bidirecional."},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    # Mirror + upload to the provider ROOT is rejected outright: the backup-dir
+    # would necessarily overlap the destination (whole drive), and a root mirror
+    # would make the entire cloud the sync target.
+    if mirror and direction == "upload" and remote == f"{provider}:":
+        return JSONResponse(
+            {"ok": False, "error": "mirror_root_not_allowed",
+             "detail": "Modo espelho com upload para a RAIZ do provedor é bloqueado "
+                       "(toda a nuvem seria destino e o backup sobreporia o destino). "
+                       "Escolha uma subpasta."},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
     config = {
         "enabled": enabled,
         "direction": direction,
         "interval_min": interval_min,
         "remote": remote,
         "local_sub": PROVIDERS[provider]["local_sub"],
+        "mirror": mirror,
     }
 
     # Reject enabled=true when the provider remote is not authenticated.
@@ -291,6 +326,78 @@ async def api_save_settings(request: Request):
     settings["providers"][provider] = config
     save_settings_atomic(settings)
     return {"ok": True}
+
+
+@app.post("/api/preview")
+async def api_preview(request: Request):
+    """Dry-run preview: builds the EXACT effective command + --dry-run, runs it
+    via rclone (120s timeout), returns counts + tail lines. Never mutates."""
+    import asyncio
+    from datetime import datetime
+    data = await request.json()
+    provider = validate_provider(data.get("provider"))
+    # Fall back to the SAVED settings for any field the caller omits — never
+    # silently preview "upload from provider root" (footgun: targets whole drive).
+    saved = scheduler.get_settings().get("providers", {}).get(provider, {})
+    direction = parse_direction(data.get("direction") or saved.get("direction", "bisync"))
+    remote_input = data.get("remote")
+    if remote_input is None or remote_input == "":
+        remote_input = saved.get("remote", "")
+    remote = normalize_remote(provider, remote_input)
+    mirror = bool(data.get("mirror", saved.get("mirror", False)))
+    local_sub = PROVIDERS[provider]["local_sub"]
+    local_path = str(Path(SYNC_DIR) / local_sub)
+
+    # Mirror + whole-cloud-drive destination warning (remote == provider root).
+    root_warning = None
+    if mirror and direction == "upload" and remote == f"{provider}:":
+        root_warning = (
+            f"ATENÇÃO: espelho + upload com remoto '{provider}:' (raiz do provedor). "
+            f"Todo o conteúdo do Drive se torna destino — NÃO permitimos (o "
+            f"backup-dir inevitavelmente sobreporia o destino)."
+        )
+
+    # Backup-dir must NOT overlap the destination (rclone rejects it).
+    # upload: destination is <remote> (a cloud subpath); put the backup at the
+    # provider ROOT so it is a sibling, never inside <remote>.  If the remote is
+    # itself the root we reject mirror (guard in api_save_settings).
+    # download: destination is local /sync/<sub>; back up under /data/deleted.
+    backup_dir = None
+    if mirror and direction in ("upload", "download"):
+        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        if direction == "upload":
+            backup_dir = f"{provider}:.gdrv-deleted/{ts}"
+        else:
+            backup_dir = str(DATA_DIR / "deleted" / provider / ts)
+
+    first_run = False
+    if direction == "bisync":
+        from .rclone_ops import bisync_first_run
+        first_run = bisync_first_run(provider)
+
+    # rclone writes its dry-run INFO lines directly into this log file.
+    log_path = None
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        (DATA_DIR / "logs").mkdir(parents=True, exist_ok=True)
+        log_path = str(DATA_DIR / "logs" / f"preview-{provider}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log")
+    except Exception:
+        pass
+
+    def _run():
+        return preview(direction, local_path, remote, provider,
+                       mirror=mirror, backup_dir=backup_dir,
+                       first_run=first_run,
+                       log_file=log_path or "/tmp/preview.log")
+
+    result = await asyncio.to_thread(_run)
+
+    resp = {"ok": result["ok"], "rc": result["rc"],
+            "transfers": result["transfers"], "deletions": result["deletions"],
+            "lines": result["lines"], "cmd": result["cmd"]}
+    if root_warning:
+        resp["root_warning"] = root_warning
+    return resp
 
 
 @app.get("/api/settings")

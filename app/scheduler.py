@@ -25,9 +25,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from .rclone_ops import (
-    sync, bisync, check_connected, ensure_dirs,
-    RCLONE_CONF, LOGS_DIR, SYNC_DIR, RCLONE_STATE_DIR,
-    bisync_first_run, section_present, invalidate_section_cache,
+    sync, copy, bisync, check_connected, ensure_dirs,
+    RCLONE_CONF, LOGS_DIR, SYNC_DIR, RCLONE_STATE_DIR, DATA_DIR,
+    bisync_first_run, section_present, invalidate_section_cache, utc_ts,
 )
 from .providers import PROVIDERS, MAX_LOG_ENTRIES
 
@@ -38,10 +38,11 @@ log = logging.getLogger("gdrv-sync")
 class RunRecord:
     """Record of a single sync run."""
 
-    def __init__(self, provider: str, direction: str, returncode: int,
+    def __init__(self, provider: str, direction: str, mode: str, returncode: int,
                  start: float, end: float):
         self.provider = provider
         self.direction = direction
+        self.mode = mode  # "copy" | "sync+backup" | "bisync"
         self.returncode = returncode
         self.start_ts = datetime.fromtimestamp(start).strftime("%H:%M:%S")
         self.duration = round(end - start, 1)
@@ -52,6 +53,7 @@ class RunRecord:
         return {
             "provider": self.provider,
             "direction": self.direction,
+            "mode": self.mode,
             "status": "ok" if self.returncode == 0 else f"exit {self.returncode}",
             "start": self.start_ts,
             "duration": self.duration,
@@ -207,13 +209,27 @@ class SyncScheduler:
             local_sub = ps.get("local_sub", provider.capitalize())
             local_path = str(Path(SYNC_DIR) / local_sub)
             interval = max(5, int(ps.get("interval_min", 5))) * 60
+            mirror = bool(ps.get("mirror", False))
 
         ts = datetime.now()
         log_file = str(Path(LOGS_DIR) / f"sync-{provider}-{ts.strftime('%Y%m%d-%H%M%S')}.log")
         first_run = bisync_first_run(provider) if direction == "bisync" else False
 
+        # Mirror backup-dir: fresh timestamp per run, computed here so the
+        # scheduler (not the UI) owns the runtime value.  upload: cloud-side
+        # backup at the provider ROOT (sibling of the destination — using
+        # <remote>/... would OVERLAP the destination and rclone rejects it).
+        # download: local-side under /data/deleted.  Bisync never uses mirror.
+        backup_dir = None
+        if mirror and direction in ("upload", "download"):
+            if direction == "upload":
+                backup_dir = f"{provider}:.gdrv-deleted/{utc_ts()}"
+            else:
+                backup_dir = str(Path(DATA_DIR) / "deleted" / provider / utc_ts())
+
         start = time.time()
         returncode = -1
+        mode = "copy"  # default non-destructive mode
 
         # Ensure local dir exists (runtime creation). Failure -> record a failed run.
         try:
@@ -227,17 +243,29 @@ class SyncScheduler:
             except Exception as exc:
                 log.error("scheduler: cannot create state dir for %s: %s", provider, exc)
             else:
-                # --- run the blocking subprocess outside self.lock, inside _exec_lock ---
+                # --- run the blocking subprocess outside self-lock, inside _exec_lock ---
                 with self._exec_lock:
                     with self.lock:
                         self.state[provider].running = True
                     try:
                         if direction == "upload":
-                            returncode = sync(local_path, remote, provider, log_file)
+                            if mirror:
+                                mode = "sync+backup"
+                                returncode = sync(local_path, remote, provider, log_file,
+                                                  mirror=True, backup_dir=backup_dir)
+                            else:
+                                returncode = copy(local_path, remote, provider, log_file)
                         elif direction == "download":
-                            returncode = sync(remote, local_path, provider, log_file)
+                            if mirror:
+                                mode = "sync+backup"
+                                returncode = sync(remote, local_path, provider, log_file,
+                                                  mirror=True, backup_dir=backup_dir)
+                            else:
+                                returncode = copy(remote, local_path, provider, log_file)
                         else:  # bisync
-                            returncode = bisync(local_path, remote, provider, log_file, first_run=first_run)
+                            mode = "bisync"
+                            returncode = bisync(local_path, remote, provider, log_file,
+                                                first_run=first_run)
                     except Exception:
                         returncode = -1
                     with self.lock:

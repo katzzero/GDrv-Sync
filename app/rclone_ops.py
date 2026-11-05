@@ -12,8 +12,9 @@ import re
 import subprocess
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Tuple, Dict, List
+from typing import Optional, Tuple, Dict, List, Any
 
 from .providers import PROVIDERS as PROVIDER_META
 
@@ -42,7 +43,9 @@ def ensure_dirs() -> None:
     import logging
     log = logging.getLogger("gdrv-sync")
     errors = []
-    for d in (LOGS_DIR, RCLONE_STATE_DIR):
+    # Mirrors may move deleted files into /data/deleted/<provider>/<ts>, so it
+    # must exist locally (visible to the user via the host ./data volume).
+    for d in (LOGS_DIR, RCLONE_STATE_DIR, DATA_DIR / "deleted"):
         try:
             d.mkdir(parents=True, exist_ok=True)
         except Exception as exc:
@@ -57,6 +60,11 @@ def ensure_dirs() -> None:
                 log.error("ensure_dirs: cannot create %s: %s", d, exc)
     if errors:
         raise RuntimeError(f"ensure_dirs: failed to create: {', '.join(errors)}")
+
+
+def utc_ts() -> str:
+    """UTC timestamp for backup-dir names (YYYYmmdd-HHMMSS)."""
+    return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
 
 def bisync_marker_path(provider: str) -> Path:
@@ -249,7 +257,7 @@ def lsd(provider: str, path: str = "") -> Tuple[int, list, str]:
     remote = f"{provider}:"
     if path:
         remote = f"{provider}:{path}"
-    returncode, stdout, stderr = rclone_cmd(["lsjson", remote, "--dirs-only"])
+    returncode, stdout, stderr = rclone_cmd(["lsjson", remote, "--dirs-only"], timeout=60)
     if returncode != 0:
         return returncode, [], stderr
     try:
@@ -266,10 +274,35 @@ def check_connected(provider: str) -> bool:
     return returncode == 0
 
 
-def sync(local_path: str, remote: str, provider: str, log_file: str) -> int:
-    """Run one-way ``rclone sync``. Returns returncode."""
+def sync(local_path: str, remote: str, provider: str, log_file: str,
+         mirror: bool = False, backup_dir: Optional[str] = None) -> int:
+    """Run one-way ``rclone sync``. Returns returncode.
+
+    When ``mirror`` is True, adds ``--backup-dir`` so destination-only files
+    are *moved* into backup-dir instead of hard-deleted. ``backup_dir`` must be
+    on the destination side (cloud for upload, local for download).
+    """
     cmd = [
         "sync", local_path, remote,
+        "--config", str(RCLONE_CONF),
+        "--log-file", log_file,
+        "--timeout", "55m",
+        "--retries", "3",
+    ]
+    if mirror and backup_dir:
+        cmd += ["--backup-dir", backup_dir]
+    returncode, _, _ = rclone_cmd(cmd, timeout=3600)
+    return returncode
+
+
+def copy(source: str, dest: str, provider: str, log_file: str) -> int:
+    """Run ``rclone copy`` (non-destructive: never deletes). Returns returncode.
+
+    The default mode for both upload and download directions.  No ``--backup-dir``
+    because copy never removes anything from the destination.
+    """
+    cmd = [
+        "copy", source, dest,
         "--config", str(RCLONE_CONF),
         "--log-file", log_file,
         "--timeout", "55m",
@@ -280,8 +313,17 @@ def sync(local_path: str, remote: str, provider: str, log_file: str) -> int:
 
 
 def bisync(local_path: str, remote: str, provider: str, log_file: str,
-           first_run: bool = False) -> int:
-    """Run ``rclone bisync``. First run adds ``--resync``. Returns returncode."""
+           first_run: bool = False, mirror: bool = False,
+           backup_dir: Optional[str] = None,
+           conflict_resolve: str = "none") -> int:
+    """Run ``rclone bisync``. First run adds ``--resync``. Returns returncode.
+
+    ``mirror`` is not a valid bisync mode — the caller/API must reject it
+    before reaching here. ``conflict_resolve`` defaults to ``none`` (conflict
+    = abort, no winner chosen).
+    """
+    if mirror:
+        raise ValueError("bisync does not support mirror mode")
     bisync_mark_running(provider)
     try:
         cmd = [
@@ -290,6 +332,7 @@ def bisync(local_path: str, remote: str, provider: str, log_file: str,
             "--log-file", log_file,
             "--timeout", "55m",
             "--retries", "3",
+            "--conflict-resolve", conflict_resolve,
         ]
         if first_run or bisync_was_interrupted(provider):
             cmd.append("--resync")
@@ -299,6 +342,122 @@ def bisync(local_path: str, remote: str, provider: str, log_file: str,
         return returncode
     finally:
         bisync_clear_running(provider)
+
+
+# ---------------------------------------------------------------------------
+# Dry-run preview (read-only: never mutates anything)
+# ---------------------------------------------------------------------------
+
+def preview(direction: str, local_path: str, remote: str, provider: str,
+            mirror: bool = False, backup_dir: Optional[str] = None,
+            first_run: bool = False, conflict_resolve: str = "none",
+            timeout: int = 120, log_file: str = "/tmp/preview.log") -> Dict[str, Any]:
+    """Build the exact effective command (incl mirror/backup-dir/bisync first-run
+    state) plus ``--dry-run`` and run it via rclone. Never mutates anything.
+
+    Returns a dict with keys:
+      ok (bool), rc (int), transfers (int), deletions (int),
+      lines (list[str] tail up to 80 sanitized), cmd (list[str]).
+    """
+    if direction == "bisync":
+        if mirror:
+            raise ValueError("bisync does not support mirror mode")
+        cmd = [
+            "bisync", local_path, remote,
+            "--log-file", log_file,
+            "--timeout", "55m",
+            "--retries", "3",
+            "--conflict-resolve", conflict_resolve,
+            "--dry-run",
+        ]
+        if first_run:
+            cmd.append("--resync")
+        base_desc = "bisync"
+    elif direction == "upload":
+        # Mirror mode uses rclone sync (+ --backup-dir) so would-be deletions are
+        # moved to the backup-dir instead of hard-deleted. Non-mirror uses copy.
+        if mirror:
+            cmd = [
+                "sync", local_path, remote,
+                "--log-file", log_file,
+                "--timeout", "55m",
+                "--retries", "3",
+                "--dry-run",
+            ]
+            if backup_dir:
+                cmd += ["--backup-dir", backup_dir]
+        else:
+            cmd = [
+                "copy", local_path, remote,
+                "--log-file", log_file,
+                "--timeout", "55m",
+                "--retries", "3",
+                "--dry-run",
+            ]
+        base_desc = "sync" if mirror else "copy"
+    elif direction == "download":
+        if mirror:
+            cmd = [
+                "sync", remote, local_path,
+                "--log-file", log_file,
+                "--timeout", "55m",
+                "--retries", "3",
+                "--dry-run",
+            ]
+            if backup_dir:
+                cmd += ["--backup-dir", backup_dir]
+        else:
+            cmd = [
+                "copy", remote, local_path,
+                "--log-file", log_file,
+                "--timeout", "55m",
+                "--retries", "3",
+                "--dry-run",
+            ]
+        base_desc = "sync" if mirror else "copy"
+    else:
+        raise ValueError(f"unknown direction: {direction!r}")
+
+    # rclone_cmd() appends _base_args() (--config ...). Build the full effective
+    # command for the report and pass the rclone subcommand portion to rclone_cmd.
+    full_cmd = ["rclone"] + cmd + _base_args()
+    returncode, stdout, stderr = rclone_cmd(cmd, timeout=timeout)
+
+    # With --log-file, per-operation INFO lines land in the LOG FILE, not
+    # stdout.  Read the log back; fall back to stdout+stderr if missing.
+    log_lines: List[str] = []
+    try:
+        log_lines = Path(log_file).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        pass
+    if not log_lines:
+        log_lines = ((stdout or "") + "\n" + (stderr or "")).splitlines()
+
+    lines = _redact(log_lines)
+
+    transfers = 0
+    deletions = 0
+    for line in lines:
+        low = line.lower()
+        # rclone 1.75 dry-run NOTICE lines:
+        #   "name: Skipped copy as --dry-run is set"      (transfer planned)
+        #   "name: Skipped delete as --dry-run is set"    (deletion planned)
+        # Older/other formats kept as fallbacks: "Copied (", "Deleted:".
+        if "skipped copy" in low or "copied (" in low:
+            transfers += 1
+        elif "skipped delete" in low or "deleted (" in low or "deleted:" in low:
+            deletions += 1
+
+    tail = lines[-80:]
+
+    return {
+        "ok": returncode == 0,
+        "rc": returncode,
+        "transfers": transfers,
+        "deletions": deletions,
+        "lines": tail,
+        "cmd": full_cmd,
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -50,15 +50,17 @@ GD-SYNC-FOLDER/
 ```json
 {
   "providers": {
-    "gdrive":   {"enabled": false, "direction": "bisync", "interval_min": 5, "remote": "gdrive:GD-SYNC", "local_sub": "Gdrive"},
-    "dropbox":  {"enabled": false, "direction": "upload", "interval_min": 5, "remote": "dropbox:", "local_sub": "Dropbox"},
-    "onedrive": {"enabled": false, "direction": "download", "interval_min": 10, "remote": "onedrive:", "local_sub": "Onedrive"}
+    "gdrive":   {"enabled": false, "direction": "bisync", "interval_min": 5, "remote": "gdrive:GD-SYNC", "local_sub": "Gdrive", "mirror": false},
+    "dropbox":  {"enabled": false, "direction": "upload", "interval_min": 5, "remote": "dropbox:", "local_sub": "Dropbox", "mirror": false},
+    "onedrive": {"enabled": false, "direction": "download", "interval_min": 10, "remote": "onedrive:", "local_sub": "Onedrive", "mirror": false}
   },
   "extra_flags": []
 }
 ```
 
 - **1 tarefa por provedor (v1)**: configs independentes (direção, intervalo, remoto, enable). `remote` vazio (`gdrive:` / `onedrive:` / `dropbox:`) → **raiz do provedor** (permitido).
+- **`mirror`**: novo booleano por provedor, padrão `false` (não destrutivo). Quando `true`, `rclone sync` leva `--backup-dir` e arquivos extras no destino são *movidos* para o backup-dir em vez de apagados. Não permitido para bisync (API rejeita com 400).
+- **`confirm_mirror`**: campo apenas no corpo de `POST /api/settings`. Obrigatório quando `mirror=true`; senão → 400 `{"ok":false,"error":"confirm_required",...}`. Não é persistido (serve só de confirmação da ação).
 - **`local_sub` é fixo por convenção** (`Gdrive`|`Dropbox`|`Onedrive`) — a app cria `/sync/<local_sub>` automaticamente no startup; NÃO é selecionável na UI.
 - **Pasta local raiz vem do docker-compose** (`${LOCAL_SYNC_DIR:-./local}` → `/sync`); a UI exibe o indicativo read-only `~/SyncDrive → /sync`.
 - `remote` da tarefa deve pertencer ao remote homônimo autenticado no `rclone.conf`.
@@ -66,15 +68,37 @@ GD-SYNC-FOLDER/
 
 ## 4. Comandos de sync executados (`L` = `/sync/<local_sub>` da aba, `R` = remote p.ex. `gdrive:GD-SYNC`)
 
+### 4.1 Padrão (não destrutivo — nunca apaga nenhum lado)
+
 | Direção | Comando |
 |---|---|
-| upload | `rclone sync $L $R` |
-| download | `rclone sync $R $L` |
-| bisync | 1ª execução: `rclone bisync $L $R --resync`; depois: `rclone bisync $L $R` |
+| upload | `rclone copy $L $R` |
+| download | `rclone copy $R $L` |
+| bisync | 1ª execução: `rclone bisync $L $R --conflict-resolve none --resync`; depois: `rclone bisync $L $R --conflict-resolve none` |
 
-- Flags base: `--config /data/rclone.conf`, `--log-file /data/logs/sync-<provider>-<ts>.log`, `--timeout 55m`, `--retries 3`.
-- Bisync mantém `--check-access` (padrão) e estado em `/data/rclone-state/<provider>/` (não mover sem `--resync`).
-- `sync` (one-way) **deleta extras no destino** — deixar isso explícito na UI.
+Flags base: `--config /data/rclone.conf`, `--log-file /data/logs/sync-<provider>-<ts>.log`, `--timeout 55m`, `--retries 3`.
+
+**Nunca deleta**: `copy` não remove nada do destino. Bisync usa `--conflict-resolve none` (conflito = aborta, nenhum lado vence) + `--check-access` padrão + primeiro-run `--resync` inalterado.
+
+### 4.2 Modo espelho (opt-in, `mirror=true`, apenas upload/download)
+
+| Direção | Comando |
+|---|---|
+| upload (mirror) | `rclone sync $L $R --backup-dir "<provider>:.gdrv-deleted/<UTC-YYYYmmdd-HHMMSS>"` |
+| download (mirror) | `rclone sync $R $L --backup-dir "/data/deleted/<provider>/<UTC-YYYYmmdd-HHMMSS>"` |
+| bisync (mirror) | **não permitido** (UI oculta; API rejeita 400) |
+
+- `--backup-dir` fica no **lado destino**, mas NUNCA pode sobrepor o destino (o rclone rejeita com "mustn't overlap"): para upload, a pasta `.gdrv-deleted/<ts>` fica na **raiz do provedor** (irmã do destino, não dentro dele — por isso **mirror + upload para a raiz é bloqueado com 400**, pois não haveria onde colocar o backup); para download, `./data/deleted/<provider>/<ts>` (visível ao usuário no volume host). Arquivos que existem no destino mas não na origem são *movidos* para lá (não apagados de verdade).
+- ts é recalculado a cada execução pelo scheduler.
+- API: `POST /api/settings` com `mirror=true` exige `confirm_mirror=true`, senão 400. Aviso extra forte quando `remote == "<provider>:"` (raiz) + mirror+upload (todo o Drive vira destino).
+
+## 4.3 Prévia dry-run (somente leitura)
+
+`POST /api/preview {provider, direction, remote, mirror}` → constrói o comando exato efetivo (incl. mirror/backup-dir/primeiro-run bisync) + `--dry-run`, executa via rclone_ops com timeout 120s, nunca muta nada. Retorna `{ok, rc, transfers, deletions, lines (tail até 80 sanitizadas), cmd}` e grava log em `/data/logs/preview-<provider>-<ts>.log`. UI mostra botão "🔍 Prévia (dry-run)" por aba com painel "N copias · M deleções" + linhas do comando; deleções>0 destacadas em vermelho com nota apontando ao comportamento do mirror/backup-dir.
+
+### 4.4 Antigo comportamento `rclone sync` (removido)
+
+O `rclone sync` puro (que deleta extras no destino) **não é mais o padrão**. Ele só aparece agora atrás do opt-in "Modo espelho" (+ `--backup-dir`), para que nada seja apagado sem consentimento explícito.
 
 ## 5. Autenticação (Opção A — OAuth "dentro do HTML", genérica por provider)
 
