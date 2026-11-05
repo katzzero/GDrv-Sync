@@ -2,9 +2,9 @@
 {% block content %}
 <section class="view active" id="view-browse">
     <div class="card">
-        <h2>Selecionar pasta — {{ provider }}</h2>
+        <h2>Selecionar pasta — {{ provider }} <span id="navStatus" style="display:none;color:var(--accent);font-size:12px;font-weight:400;margin-left:8px">Carregando…</span></h2>
         <div class="sub">
-            rclone lsd <code>{{ provider }}:{{ path }}</code> (somente pastas).
+            Somente pastas. Clique para entrar; use <b>Selecionar esta pasta</b> para escolher a mostrada no caminho abaixo.
         </div>
 
         {% if not connected %}
@@ -64,9 +64,27 @@
 const PROVIDER = {{ provider|tojson }};
 let currentPath = {{ path|tojson }};
 const FOLDERS = JSON.parse(document.getElementById('folderlist').dataset.folders || '[]');
+let navigating = false;
 
-function goRoot(){ currentPath=''; navigate(); }
-function goFolder(idx){ currentPath = (currentPath ? currentPath + '/' : '') + FOLDERS[idx]; navigate(); }
+function lockList(clickedEl){
+  // Immediate feedback + block further clicks until this navigation completes.
+  navigating = true;
+  const list = document.getElementById('folderlist');
+  list.style.opacity = '0.5';
+  list.style.pointerEvents = 'none';
+  if(clickedEl){ clickedEl.style.opacity='1'; clickedEl.style.background='rgba(79,140,255,.25)'; }
+  const st = document.getElementById('navStatus');
+  if(st){ st.textContent = 'Carregando…'; st.style.display='inline'; }
+}
+
+function goRoot(){ if(navigating) return; currentPath=''; lockList(document.querySelector('.root-item')); navigate(); }
+function goFolder(idx){
+  if(navigating) return;
+  const el = document.querySelectorAll('#folderlist .fitem')[idx+1]; // +1: root item first
+  currentPath = (currentPath ? currentPath + '/' : '') + FOLDERS[idx];
+  lockList(el);
+  navigate();
+}
 function navigate(){
   const qs = new URLSearchParams({provider: PROVIDER});
   if(currentPath) qs.set('path', currentPath);
