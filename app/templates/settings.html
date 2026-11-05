@@ -15,6 +15,7 @@
 const PROVIDERS = ['gdrive', 'dropbox', 'onedrive'];
 const LABELS = {gdrive:'Google Drive', dropbox:'Dropbox', onedrive:'OneDrive'};
 const SUBS = {gdrive:'Gdrive', dropbox:'Dropbox', onedrive:'Onedrive'};
+const DEDICATED = 'GDrv-Folder';
 let state = {}; // provider -> {connected, enabled, direction, interval, remote, local_sub, mirror}
 let active = 'gdrive';
 
@@ -41,18 +42,42 @@ async function load(){
   const provState = (h.providers || {});
   PROVIDERS.forEach(p=>{
     if(!state[p]) state[p] = {enabled:false, direction:'upload', interval_min:5, remote:'', local_sub:SUBS[p], mirror:false};
+    if(!state[p].local_sub) state[p].local_sub = SUBS[p];
     state[p].connected = provState[p]?.connected ?? false;
     state[p].enabled = provState[p]?.enabled ?? !!state[p].enabled;
     // default mirror false (never delete anything by default)
     if(state[p].mirror === undefined) state[p].mirror = false;
-  });
+});
+
+async function useDedicated(p, btn){
+  const warn = document.getElementById('ded-warn-'+p);
+  btn.disabled = true; btn.textContent='Criando…';
+  try{
+    const r = await fetch('/api/use-dedicated',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:p})});
+    const j = await r.json();
+    if(!r.ok || !j.ok){
+      if(warn){ warn.textContent = '⛔ '+(j.detail||j.error||'falhou'); warn.classList.add('show'); }
+      btn.disabled=false; btn.textContent=`📦 Criar/usar pasta dedicada "${DEDICATED}"`;
+      return;
+    }
+    state[p].remote = j.remote;
+    renderPane();
+    const w2 = document.getElementById('ded-warn-'+p);
+    if(w2){ w2.classList.add('show');
+      w2.textContent = j.warning ? ('⚠ '+j.warning) : `✅ Pasta dedicada criada/selecionada: ${j.remote}`; }
+  }catch(e){
+    if(warn){ warn.textContent = '⛔ Erro de rede: '+e; warn.classList.add('show'); }
+    btn.disabled=false; btn.textContent=`📦 Criar/usar pasta dedicada "${DEDICATED}"`;
+  }
+}
   renderTabs(); renderPane();
 }
 
 function renderPane(){
   const p = active, s = state[p] || {};
   const connected = s.connected;
-  const local = `/sync/${SUBS[p]}`;
+  const localSub = s.local_sub || SUBS[p];
+  const local = `/sync/${localSub}`;
   const canEnable = connected;
   const isBisync = s.direction === 'bisync';
   // mirror only meaningful for one-way directions
@@ -102,9 +127,11 @@ function renderPane(){
     ${connHtml}
     <div class="row" style="margin-top:14px">
       <div style="flex:1">
-        <label class="f">Pasta local (fixa por provedor)</label>
-        <input type="text" value="${escapeAttr(local)}" readonly style="background:#131a29;color:var(--muted)">
-        <div style="font-size:11px;color:var(--muted);margin-top:4px">Criada automaticamente dentro do volume LOCAL_SYNC_DIR (docker-compose).</div>
+        <label class="f">Pasta local (dentro de /sync)</label>
+        <div class="row">
+          <input type="text" id="localsub-${p}" value="${escapeAttr(localSub)}" ${s.enabled?'readonly':''}>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Criada automaticamente no volume LOCAL_SYNC_DIR. Padrão: uma por provedor (independentes). <b>Hub:</b> use o MESMO nome em várias abas para copiar a mesma pasta para todas as nuvens selecionadas${s.enabled?' (edite desabilitando a tarefa)':''}.</div>
       </div>
       <div style="flex:1">
         <label class="f">Pasta na nuvem</label>
@@ -112,7 +139,10 @@ function renderPane(){
           <input type="text" id="remote-${p}" value="${remoteEscaped}" placeholder="${placeholderEscaped}">
           <button class="btn ghost" onclick="openBrowse('${p}')" ${!connected?'disabled':''}>📁 Navegar</button>
         </div>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px">Vazio (<code>${escapeHtml(p)}:</code>) = raiz do provedor.</div>
+        ${connected && (remoteVal === '' || remoteVal === p+':')
+          ? `<button class="btn small ghost" style="margin-top:6px" onclick="useDedicated('${p}', this)">📦 Criar/usar pasta dedicada "${DEDICATED}"</button>` : ''}
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Vazio (<code>${escapeHtml(p)}:</code>) = raiz do provedor — evite (todo o Drive vira destino).</div>
+        <div id="ded-warn-${p}" class="warnbox" style="margin-top:6px"></div>
       </div>
     </div>
     <label class="f" style="margin-top:16px">Direção</label>
@@ -214,6 +244,7 @@ async function saveSettings(p){
     direction: state[p].direction,
     interval_min: parseInt(document.getElementById('interval-'+p).value)||5,
     remote: document.getElementById('remote-'+p).value||'',
+    local_sub: (document.getElementById('localsub-'+p)||{}).value || '',
     mirror: mirror,
     confirm_mirror: mirror ? (confirmCb ? confirmCb.checked : false) : false,
   };
@@ -229,11 +260,12 @@ async function saveSettings(p){
       state[p].direction = cfg.direction;
       state[p].interval_min = cfg.interval_min;
       state[p].remote = cfg.remote;
+      state[p].local_sub = (document.getElementById('localsub-'+p)||{}).value || state[p].local_sub;
       state[p].mirror = cfg.mirror;
       renderPane();
       setTimeout(()=>{if(btn) btn.textContent=orig;}, 900);
     } else {
-      alert(j.error||'Falha ao salvar');
+      alert(j.error||j.detail||'Falha ao salvar');
       if(btn) btn.textContent=orig;
     }
   }catch(e){

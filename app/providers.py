@@ -1,5 +1,9 @@
 """Static metadata for cloud providers."""
 
+# Dedicated cloud folder the UI offers to create/use on connect
+# (sandbox for any future destructive op; see docs/PLANO.md §6a).
+DEDICATED_FOLDER = "GDrv-Folder"
+
 PROVIDERS = {
     "gdrive": {
         "label": "Google Drive",

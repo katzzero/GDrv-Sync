@@ -202,7 +202,7 @@ const PROV={
   dropbox:{label:'Dropbox',     sub:'Dropbox',  root:'raiz do Dropbox (app rclone)', icon:'🔵'},
   onedrive:{label:'OneDrive',   sub:'Onedrive', root:'raiz do OneDrive', icon:'☁️'}
 };
-const state={}; for(const k in PROV) state[k]={connected:false, remote:'', dir:'bisync', interval:5, enabled:false, warned:false};
+const state={}; for(const k in PROV) state[k]={connected:false, remote:'', localSub:PROV[k].sub, dir:'upload', interval:5, enabled:false, warned:false};
 let active='gdrive';
 
 /* ---------- navegação principal ---------- */
@@ -231,23 +231,23 @@ function cmdFor(s,local,remote){
 }
 function renderPane(){
   const k=active, p=PROV[k], s=state[k];
-  const local=`/sync/${p.sub}`;
+  const local=`/sync/${s.localSub||p.sub}`;
   const conn = s.connected
     ? `<div class="connstat ok">✓ <code>${k}</code> autenticado <div class="spacer"></div></div>`
     : `<div class="connstat off">✗ <code>${k}</code> não autenticado <div class="spacer"></div><button class="btn small ghost" onclick="go('connect')">Conectar</button></div>`;
   const dirs = ['upload','download','bisync'].map(d=>
     `<div class="dir ${s.dir===d?'sel':''}" onclick="setDir('${d}')">${
-      d==='upload'?'<b>⬆︎ Upload</b><small>espelha local → nuvem. Extras na nuvem são <u>apagados</u>.</small>'
-      :d==='download'?'<b>⬇︎ Download</b><small>espelha nuvem → local. Extras locais são <u>apagados</u>.</small>'
-      :'<b>⇄ Bidirecional</b><small>bisync: mudanças dos dois lados. 1ª execução usa --resync.</small>'
+      d==='upload'?'<b>⬆︎ Upload</b><small>copia local → nuvem. <u>Nunca apaga</u> na nuvem (padrão não-destrutivo).</small>'
+      :d==='download'?'<b>⬇︎ Download</b><small>copia nuvem → local. <u>Nunca apaga</u> no local (padrão não-destrutivo).</small>'
+      :'<b>⇄ Bidirecional — DESTRUTIVO</b><small>propaga deleções nos dois lados; conflito de conteúdo = aborta.</small>'
     }</div>`).join('');
   document.getElementById('tabpane').innerHTML = `
     ${conn}
     <div class="row" style="margin-top:14px">
       <div style="flex:1">
-        <label class="f">Pasta local (fixa por provedor)</label>
-        <input type="text" value="${local}" readonly style="background:#131a29; color:var(--muted)">
-        <div style="font-size:11px;color:var(--muted);margin-top:4px">📦 Criada automaticamente dentro do volume <code>LOCAL_SYNC_DIR</code> (docker-compose).</div>
+        <label class="f">Pasta local (dentro de /sync)</label>
+        <input type="text" value="${s.localSub}" onchange="state['${k}'].localSub=this.value" ${s.enabled?'readonly':''}>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">📦 Criada automaticamente no volume <code>LOCAL_SYNC_DIR</code>. Padrão: uma por provedor. <b>Hub:</b> mesmo nome em várias abas = mesma pasta copiada para todas.</div>
       </div>
       <div style="flex:1">
         <label class="f">Pasta na nuvem</label>
@@ -255,12 +255,13 @@ function renderPane(){
           <input type="text" value="${s.remote}" placeholder="${k}:" readonly>
           <button class="btn ghost" onclick="openBrowse()">📁 Navegar</button>
         </div>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px">Vazio (<code>${k}:</code>) = ${p.root}.</div>
+        ${(s.connected && (s.remote==='' || s.remote===k+':')) ? `<button class="btn small ghost" style="margin-top:6px" onclick="useDedicated('${k}')">📦 Criar/usar pasta dedicada "GDrv-Folder"</button>` : ''}
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Vazio (<code>${k}:</code>) = raiz do provedor — evite (todo o Drive vira destino).</div>
       </div>
     </div>
     <label class="f" style="margin-top:16px">Direção</label>
     <div class="dirs">${dirs}</div>
-    <div class="warnbox ${s.dir!=='bisync'?'show':''}">⚠️ Modo one-way deleta arquivos no destino que não existem na origem.</div>
+
     <div class="row" style="margin-top:18px">
       <div style="flex:1">
         <label class="f">Intervalo (min) — mínimo recomendado 5</label>
@@ -277,6 +278,7 @@ function renderPane(){
       <code>${cmdFor(s.dir,local, s.remote||k+':')}</code></div>`;
 }
 function setDir(d){state[active].dir=d; renderPane();}
+function useDedicated(k){ state[k].remote = k+':GDrv-Folder'; renderPane(); }
 function saveSettings(b,k){
   const t=b.textContent; b.textContent='Salvando…';
   setTimeout(()=>{b.textContent='✓ Salvo';

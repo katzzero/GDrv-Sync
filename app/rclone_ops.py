@@ -52,7 +52,15 @@ def ensure_dirs() -> None:
             errors.append(str(d))
             log.error("ensure_dirs: cannot create %s: %s", d, exc)
     for provider in PROVIDERS:
-        for d in (SYNC_DIR / provider.capitalize(), RCLONE_STATE_DIR / provider):
+        # Honor the configured (possibly custom) local_sub when settings.json
+        # exists; fall back to the provider's default subfolder name.
+        sub = provider.capitalize()
+        try:
+            s = json.loads((DATA_DIR / "settings.json").read_text(encoding="utf-8"))
+            sub = (s.get("providers", {}).get(provider, {}) or {}).get("local_sub") or sub
+        except (OSError, ValueError):
+            pass
+        for d in (SYNC_DIR / sub, RCLONE_STATE_DIR / provider):
             try:
                 d.mkdir(parents=True, exist_ok=True)
             except Exception as exc:
@@ -273,6 +281,28 @@ def lsd(provider: str, path: str = "") -> Tuple[int, list, str]:
         return -1, [], f"failed to parse lsjson output: {exc}"
     dirs = [e.get("Path") or e.get("Name") for e in data if e.get("IsDir")]
     return 0, dirs, ""
+
+
+def mkdir_remote(provider: str, folder: str) -> Tuple[int, str]:
+    """Create a cloud folder (idempotent — rc=0 if it already exists)."""
+    returncode, _, stderr = rclone_cmd(["mkdir", f"{provider}:{folder}"], timeout=60)
+    return returncode, stderr
+
+
+def remote_is_empty(provider: str, folder: str) -> Tuple[Optional[bool], str]:
+    """Best-effort emptiness check for the dedicated-folder adoption warning.
+
+    Counts FILES AND SUBFOLDERS (lsd alone would miss files and falsely
+    report a folder full of files as "empty").
+    Returns (is_empty, err): None if we could not tell.
+    """
+    returncode, stdout, stderr = rclone_cmd(["lsjson", f"{provider}:{folder}"], timeout=60)
+    if returncode != 0:
+        return None, stderr
+    try:
+        return len(json.loads(stdout)) == 0, ""
+    except ValueError as exc:
+        return None, str(exc)
 
 
 def check_connected(provider: str) -> bool:

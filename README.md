@@ -68,12 +68,12 @@ by uid 1000 (Colima/Docker Desktop typically pass the host uid through).  If
    `localhost:53682` (published in compose). No copy/paste of tokens is needed.
 
 2. **Configure sync tasks** in the Settings tab ("Configurações") — one tab per provider:
-   - Fixed local folder: `/sync/Gdrive`, `/sync/Dropbox`, `/sync/Onedrive`
-     (created automatically inside the `LOCAL_SYNC_DIR` volume)
-   - Pick the cloud folder (leave empty for the provider root)
-   - Direction: upload, download or bisync
-   - Interval (minimum 5 minutes)
-   - Enable the task
+   - **Local folder** (inside `/sync`): defaults to one per provider — `Gdrive`, `Dropbox`, `Onedrive` (**independent** tasks; each cloud only ever sees its own local folder). **Hub mode:** type the *same* name in several tabs and that one local folder is copied to all those clouds. Tasks that are enabled lock this field.
+   - **Dedicated cloud folder:** when the cloud destination is still the provider root and the task is disabled, a "📦 Criar/usar pasta dedicada GDrv-Folder" button creates (idempotent `rclone mkdir`) and adopts a dedicated sandbox folder as the destination. If the folder already existed with content, the app warns you to review before enabling Bidirectional/Mirror.
+   - Pick another cloud folder via 📁 Navegar if you prefer.
+   - Direction: upload, download or bisync (bisync propagates deletions both ways — the card says so).
+   - Interval (minimum 5 minutes).
+   - Enable the task.
 
    A task can only be enabled once its provider is authenticated.
 
@@ -129,7 +129,8 @@ docker run -p 5522:5522 -p 5533:5533 rclone/rclone:latest gui --addr 0.0.0.0:552
 - `GET /browse?provider=&path=` - Provider folder picker (breadcrumb + root)
 - `GET /healthz` - Health check (JSON; 503 when rclone missing or any enabled provider has 3+ consecutive failures)
 - `GET /api/settings` - Current settings
-- `POST /api/settings` - Save provider settings (rejects `enabled=true` when not authenticated; `mirror=true` requires `confirm_mirror=true` and is rejected for `direction=bisync`)
+- `POST /api/settings` - Save provider settings (rejects `enabled=true` when not authenticated; `mirror=true` requires `confirm_mirror=true` and is rejected for `direction=bisync`; `local_sub` validated to safe names — same name across providers = hub mode)
+- `POST /api/use-dedicated` - Create & adopt the sandbox folder `<provider>:GDrv-Folder` (only when remote is root/empty and task disabled; warns if the folder already had content)
 - `POST /api/preview` - Dry-run preview of the exact effective command (+ `--dry-run`), read-only, never mutates
 - `POST /api/connect/start` - Start OAuth flow (returns `auth_url`)
 - `GET /api/connect/status?provider=` - OAuth connection status

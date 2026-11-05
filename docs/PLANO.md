@@ -50,7 +50,7 @@ GD-SYNC-FOLDER/
 ```json
 {
   "providers": {
-    "gdrive":   {"enabled": false, "direction": "bisync", "interval_min": 5, "remote": "gdrive:GD-SYNC", "local_sub": "Gdrive", "mirror": false},
+    "gdrive":   {"enabled": false, "direction": "upload", "interval_min": 5, "remote": "gdrive:GDrv-Folder", "local_sub": "Gdrive", "mirror": false},
     "dropbox":  {"enabled": false, "direction": "upload", "interval_min": 5, "remote": "dropbox:", "local_sub": "Dropbox", "mirror": false},
     "onedrive": {"enabled": false, "direction": "download", "interval_min": 10, "remote": "onedrive:", "local_sub": "Onedrive", "mirror": false}
   },
@@ -61,7 +61,8 @@ GD-SYNC-FOLDER/
 - **1 tarefa por provedor (v1)**: configs independentes (direção, intervalo, remoto, enable). `remote` vazio (`gdrive:` / `onedrive:` / `dropbox:`) → **raiz do provedor** (permitido).
 - **`mirror`**: novo booleano por provedor, padrão `false` (não destrutivo). Quando `true`, `rclone sync` leva `--backup-dir` e arquivos extras no destino são *movidos* para o backup-dir em vez de apagados. Não permitido para bisync (API rejeita com 400).
 - **`confirm_mirror`**: campo apenas no corpo de `POST /api/settings`. Obrigatório quando `mirror=true`; senão → 400 `{"ok":false,"error":"confirm_required",...}`. Não é persistido (serve só de confirmação da ação).
-- **`local_sub` é fixo por convenção** (`Gdrive`|`Dropbox`|`Onedrive`) — a app cria `/sync/<local_sub>` automaticamente no startup; NÃO é selecionável na UI.
+- **`local_sub` é configurável por provedor** (default `Gdrive`|`Dropbox`|`Onedrive`, um por aba = **independentes**; a app cria `/sync/<local_sub>` automaticamente). **Modo hub:** usar o MESMO nome em várias abas faz a mesma pasta local ser copiada para todas aquelas nuvens. Validação: `[A-Za-z0-9][A-Za-z0-9 _-]{0,63}` (sem `/`, sem `..`); tarefa habilitada ⇒ campo travado na UI.
+- **§6a. Pasta dedicada (`GDrv-Folder`)**: na aba Settings, quando o remote está em raiz/vazio e a tarefa desabilitada, aparece o botão "📦 Criar/usar pasta dedicada" → `POST /api/use-dedicated`: roda `rclone mkdir <prov>:GDrv-Folder` (idempotente), checa se a pasta **já tinha conteúdo** (`lsjson` files+dirs) e grava `remote = <prov>:GDrv-Folder`. Se já existia com dados ⇒ aviso de adoção ("revise antes de bisync/espelho"). Nunca age sobre tarefa habilitada nem sobre remote já configurado (400); falha de mkdir não quebra o connect (endpoint separado, best-effort).
 - **Pasta local raiz vem do docker-compose** (`${LOCAL_SYNC_DIR:-./local}` → `/sync`); a UI exibe o indicativo read-only `~/SyncDrive → /sync`.
 - `remote` da tarefa deve pertencer ao remote homônimo autenticado no `rclone.conf`.
 - UI revalida na API: tarefa sem remote autenticado → bloqueia `enabled` dela (as outras seguem funcionando).

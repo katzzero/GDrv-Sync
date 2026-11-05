@@ -13,14 +13,14 @@ from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from .providers import PROVIDERS
+from .providers import PROVIDERS, DEDICATED_FOLDER
 from .rclone_ops import (
     version as rclone_version,
     lsd, check_connected, ensure_dirs, section_present, invalidate_section_cache,
     RCLONE_CONF, LOGS_DIR, DATA_DIR, SYNC_DIR,
     authorize_start, authorize_finish, authorize_cancel, authorize_remove, write_rclone_section,
     get_authorize_session,
-    preview,
+    preview, mkdir_remote, remote_is_empty,
 )
 from .callback_proxy import start_callback_proxy
 from .scheduler import scheduler, SETTINGS_PATH
@@ -109,6 +109,23 @@ def parse_interval(value: Any) -> int:
         )
     return iv
 
+
+def parse_local_sub(value: Any, provider: str) -> str:
+    """Validate a configurable per-provider local folder name (hub/independent).
+
+    Safe ASCII names only: no '/', no '..', cannot start with '.', max 64 chars.
+    Default = the provider's fixed subfolder (independent per provider).
+    """
+    if value is None or str(value).strip() == "":
+        return PROVIDERS[provider]["local_sub"]
+    name = str(value)
+    if name != name.strip() or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _\-]{0,63}", name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=("local folder must be 1-64 chars: letters/digits/space/_/-, "
+                    "starting with alnum; no '/' or '..' (e.g. 'Gdrive')"),
+        )
+    return name
 
 def parse_direction(value: Any) -> str:
     """Allow-list direction (L2)."""
@@ -302,7 +319,7 @@ async def api_save_settings(request: Request):
         "direction": direction,
         "interval_min": interval_min,
         "remote": remote,
-        "local_sub": PROVIDERS[provider]["local_sub"],
+        "local_sub": parse_local_sub(data.get("local_sub"), provider),
         "mirror": mirror,
     }
 
@@ -340,7 +357,7 @@ async def api_preview(request: Request):
         remote_input = saved.get("remote", "")
     remote = normalize_remote(provider, remote_input)
     mirror = bool(data.get("mirror", saved.get("mirror", False)))
-    local_sub = PROVIDERS[provider]["local_sub"]
+    local_sub = saved.get("local_sub") or PROVIDERS[provider]["local_sub"]
     local_path = str(Path(SYNC_DIR) / local_sub)
 
     # Mirror validity must match api_save_settings, so the preview never shows a
@@ -398,6 +415,70 @@ async def api_preview(request: Request):
             "transfers": result["transfers"], "deletions": result["deletions"],
             "lines": result["lines"], "cmd": result["cmd"]}
     return resp
+
+
+@app.post("/api/use-dedicated")
+async def api_use_dedicated(request: Request):
+    """Create the dedicated cloud folder and adopt it as the task's remote.
+
+    Advisor-approved conservative rule: only acts when the task's remote is
+    still empty/root AND the task is NOT enabled (never retargets a live task,
+    never runs silently on reconnect). mkdir is idempotent; if the folder
+    already existed we warn (it may contain real data — review before
+    enabling bisync/mirror).
+    """
+    import asyncio
+    data = await request.json()
+    provider = validate_provider(data.get("provider"))
+
+    settings = load_settings()
+    saved = settings.get("providers", {}).get(provider, {})
+    remote = (saved.get("remote") or "").strip()
+    if remote not in ("", f"{provider}:"):
+        return JSONResponse(
+            {"ok": False, "error": "remote_already_set",
+             "detail": f"remote atual é '{remote}'; a pasta dedicada só é sugerida quando o destino é a raiz."},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    if saved.get("enabled"):
+        return JSONResponse(
+            {"ok": False, "error": "task_enabled",
+             "detail": "desabilite a tarefa antes de trocar o destino para a pasta dedicada."},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    if not section_present(provider):
+        return JSONResponse(
+            {"ok": False, "error": "not_connected",
+             "detail": "conecte o provedor primeiro."},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+
+    existed = await asyncio.to_thread(remote_is_empty, provider, DEDICATED_FOLDER)
+    rc, err = await asyncio.to_thread(mkdir_remote, provider, DEDICATED_FOLDER)
+    if rc != 0:
+        return JSONResponse(
+            {"ok": False, "error": "mkdir_failed",
+             "detail": err or "rclone mkdir falhou (escopo sem permissão de escrita?)"},
+            status_code=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    saved_dir = settings.setdefault("providers", {}).setdefault(provider, {})
+    saved_dir["remote"] = f"{provider}:{DEDICATED_FOLDER}"
+    save_settings_atomic(settings)
+    invalidate_section_cache()  # cheap consistency; remote display refresh
+
+    warning = None
+    if existed[0] is False:
+        warning = (f"A pasta '{DEDICATED_FOLDER}' já existia e CONTEM dados. "
+                   "Revise antes de habilitar Bidirecional ou Espelho — podem alterá-la/apagá-la.")
+    elif existed[0] is None:
+        warning = (f"Não foi possível verificar se '{DEDICATED_FOLDER}' já tinha conteúdo. "
+                   "Confira na UI antes de habilitar modos destrutivos.")
+
+    return {"ok": True,
+            "remote": f"{provider}:{DEDICATED_FOLDER}",
+            "created_new": existed[0] is not False,
+            "warning": warning}
 
 
 @app.get("/api/settings")
