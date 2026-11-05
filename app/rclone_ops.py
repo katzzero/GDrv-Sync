@@ -6,6 +6,7 @@ locally (``DATA_DIR=./data``).  The local sync root is ``SYNC_DIR``
 (``/sync`` in-container, bind-mounted via docker-compose).
 """
 
+import json
 import os
 import re
 import subprocess
@@ -241,24 +242,21 @@ def rclone_binary_ok() -> bool:
 def lsd(provider: str, path: str = "") -> Tuple[int, list, str]:
     """List directories under ``<provider>:<path>``. Returns (rc, dirs, err).
 
-    Filters rclone's trailing "Total: N dirs" summary line out of results.
+    Uses ``rclone lsjson --dirs-only`` (machine-readable, stable across
+    versions) instead of parsing the column-aligned ``lsd`` output, which
+    corrupts folder names containing spaces.
     """
     remote = f"{provider}:"
     if path:
         remote = f"{provider}:{path}"
-    returncode, stdout, stderr = rclone_cmd(["lsd", remote])
+    returncode, stdout, stderr = rclone_cmd(["lsjson", remote, "--dirs-only"])
     if returncode != 0:
         return returncode, [], stderr
-    dirs: List[str] = []
-    for line in stdout.splitlines():
-        if not line.strip():
-            continue
-        if line.strip().startswith("Total:"):
-            continue
-        # rclone lsd output is tab-separated; the last field is the name.
-        parts = line.split("\t")
-        if parts:
-            dirs.append(parts[-1])
+    try:
+        data = json.loads(stdout)
+    except ValueError as exc:
+        return -1, [], f"failed to parse lsjson output: {exc}"
+    dirs = [e.get("Path") or e.get("Name") for e in data if e.get("IsDir")]
     return 0, dirs, ""
 
 
