@@ -348,23 +348,28 @@ async def api_preview(request: Request):
     local_sub = PROVIDERS[provider]["local_sub"]
     local_path = str(Path(SYNC_DIR) / local_sub)
 
-    # Mirror + whole-cloud-drive destination warning (remote == provider root).
-    root_warning = None
+    # Mirror validity must match api_save_settings, so the preview never shows a
+    # command the real save would reject (and avoids a 500 from preview()).
+    if mirror and direction == "bisync":
+        return JSONResponse(
+            {"ok": False, "error": "mirror_not_allowed_for_bisync"},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
     if mirror and direction == "upload" and remote == f"{provider}:":
-        root_warning = (
-            f"ATENÇÃO: espelho + upload com remoto '{provider}:' (raiz do provedor). "
-            f"Todo o conteúdo do Drive se torna destino — NÃO permitimos (o "
-            f"backup-dir inevitavelmente sobreporia o destino)."
+        return JSONResponse(
+            {"ok": False, "error": "mirror_root_not_allowed"},
+            status_code=status.HTTP_400_BAD_REQUEST,
         )
 
     # Backup-dir must NOT overlap the destination (rclone rejects it).
     # upload: destination is <remote> (a cloud subpath); put the backup at the
     # provider ROOT so it is a sibling, never inside <remote>.  If the remote is
-    # itself the root we reject mirror (guard in api_save_settings).
+    # itself the root we reject mirror (guard above).
     # download: destination is local /sync/<sub>; back up under /data/deleted.
+    from .rclone_ops import utc_ts
     backup_dir = None
     if mirror and direction in ("upload", "download"):
-        ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        ts = utc_ts()
         if direction == "upload":
             backup_dir = f"{provider}:.gdrv-deleted/{ts}"
         else:
@@ -372,8 +377,10 @@ async def api_preview(request: Request):
 
     first_run = False
     if direction == "bisync":
-        from .rclone_ops import bisync_first_run
-        first_run = bisync_first_run(provider)
+        from .rclone_ops import bisync_first_run, bisync_was_interrupted
+        # Must match the scheduler: --resync runs on first-run OR after an
+        # interrupted (killed) bisync, else the preview under-reports.
+        first_run = bisync_first_run(provider) or bisync_was_interrupted(provider)
 
     # rclone writes its dry-run INFO lines directly into this log file.
     log_path = None
@@ -395,8 +402,6 @@ async def api_preview(request: Request):
     resp = {"ok": result["ok"], "rc": result["rc"],
             "transfers": result["transfers"], "deletions": result["deletions"],
             "lines": result["lines"], "cmd": result["cmd"]}
-    if root_warning:
-        resp["root_warning"] = root_warning
     return resp
 
 

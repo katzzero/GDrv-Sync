@@ -181,6 +181,7 @@ function toggleMirror(p){
   if(!cb) return;
   conf.disabled = !cb.checked;
   if(!cb.checked){ conf.checked = false; }
+  state[p].mirror = cb.checked;   // persist so renderPane() does NOT revert the box
   warn.classList.toggle('show', !!cb.checked);
   renderPane(); // re-render to update direction disabled states & warning
 }
@@ -271,19 +272,29 @@ async function previewCmd(p){
   try{
     const r = await fetch('/api/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
       provider: p,
-      direction: s.direction,
-      remote: s.remote||'',
-      mirror: !!s.mirror,
+      direction: state[p].direction,
+      // read LIVE DOM (manually typed / popup-selected remote), not stale state
+      remote: (document.getElementById('remote-'+p)||{}).value || '',
+      mirror: !!(( document.getElementById('mirror-'+p)||{}).checked),
     })});
     const j = await r.json();
+    if(!r.ok){
+      const msg = j.error === 'mirror_root_not_allowed'
+        ? '⛔ Espelho + upload para a RAIZ do provedor é bloqueado. Escolha uma subpasta.'
+        : (j.error === 'mirror_not_allowed_for_bisync'
+            ? '⛔ Espelho não é permitido na direção Bidirecional.'
+            : '⛔ Prévia indisponível: '+(j.error||r.status));
+      linesEl.textContent = msg; countEl.textContent=''; delNote.style.display='none';
+      return;
+    }
     linesEl.textContent = (j.cmd||[]).join('\n') + '\n\n' + (j.lines||[]).join('\n');
     countEl.textContent = `${j.transfers||0} cópias · ${j.deletions||0} deleções`;
     if(j.deletions && j.deletions>0){
       delNote.style.display = 'block';
       delNum.textContent = j.deletions;
     }
-    if(j.root_warning){
-      linesEl.textContent = '⚠ '+j.root_warning+'\n\n'+linesEl.textContent;
+    if(!j.ok && j.rc){
+      linesEl.textContent = '⚠ rclone rc='+j.rc+'\n'+linesEl.textContent;
     }
   }catch(e){
     linesEl.textContent = 'Erro ao gerar prévia: '+String(e);

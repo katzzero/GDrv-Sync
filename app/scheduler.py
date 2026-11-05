@@ -275,7 +275,7 @@ class SyncScheduler:
         # Guarantee running=False on every path (incl. early mkdir failures).
         with self.lock:
             self.state[provider].running = False
-            record = RunRecord(provider, direction, returncode, start, end)
+            record = RunRecord(provider, direction, mode, returncode, start, end)
             self.state[provider].last_runs.appendleft(record)
 
             if returncode == 0:
