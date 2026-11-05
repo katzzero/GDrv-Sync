@@ -206,5 +206,17 @@ Returns `503` when the rclone binary is missing/invalid **or** any provider with
 This project is licensed under the **AGPL-3.0-only** (GNU Affero General Public License v3.0).
 See the [LICENSE](LICENSE) file for details.
 
+## Language
+
+The WebUI defaults to **pt-BR** (Portuguese/Brazil). A header language toggle (**PT** / **EN**)
+lets you switch to English at any time. The choice is stored in a cookie (`gdrv_lang`,
+max-age 1 year) and honored on every request; without a cookie the `Accept-Language`
+header is consulted (starts with `en` → English, otherwise Portuguese).
+
+Both server-rendered Jinja strings and client JS-generated strings are localized from
+the same dictionary (`app/i18n.py`), and user-facing API messages (mirror guards,
+dedicated-folder, connect errors, etc.) are translated via the same language selection.
+Machine-readable error codes (e.g. `error:"confirm_required"`) are kept untranslated.
+
 **rclone** is a separate program, licensed under the **MIT License**, downloaded
 at Docker image build time.

@@ -2,8 +2,8 @@
 {% block content %}
 <section class="view active" id="view-settings">
     <div class="card">
-        <h2>Configurações por provedor</h2>
-        <div class="sub">Cada aba tem sua tarefa própria: pasta local fixa em <code>/sync/&lt;Provedor&gt;</code> (criada automaticamente) ↔ pasta escolhida na nuvem.</div>
+        <h2>{{ t('settings_title') }}</h2>
+        <div class="sub">{{ t('settings_sub') }}</div>
 
         <!-- Providers badges (connected state) rendered by JS from /healthz -->
         <div class="tabs" id="tabs"></div>
@@ -13,7 +13,7 @@
 
 <script>
 const PROVIDERS = ['gdrive', 'dropbox', 'onedrive'];
-const LABELS = {gdrive:'Google Drive', dropbox:'Dropbox', onedrive:'OneDrive'};
+const LABELS = {gdrive:t('prov_gdrive'), dropbox:t('prov_dropbox'), onedrive:t('prov_onedrive')};
 const SUBS = {gdrive:'Gdrive', dropbox:'Dropbox', onedrive:'Onedrive'};
 const DEDICATED = 'GDrv-Folder';
 let state = {}; // provider -> {connected, enabled, direction, interval, remote, local_sub, mirror}
@@ -29,7 +29,7 @@ function escapeAttr(t){ return escapeHtml(t); }
 
 function renderTabs(){
   document.getElementById('tabs').innerHTML = PROVIDERS.map(p =>
-    `<button class="${p===active?'on':''}" onclick="setTab('${p}')">${LABELS[p]}</button>`).join('');
+    `<button class="${p===active?'on':''}" onclick="setTab('${p}')">${escapeHtml(LABELS[p])}</button>`).join('');
 }
 function setTab(p){active=p; renderTabs(); renderPane();}
 
@@ -63,20 +63,20 @@ function renderPane(){
   const mirror = !!s.mirror;
 
   const connHtml = connected
-    ? `<div class="connstat ok">✓ <code>${escapeHtml(p)}</code> autenticado <div class="spacer"></div><button class="btn small ghost" onclick="go('connect')">Reconectar</button></div>`
-    : `<div class="connstat off">✗ <code>${escapeHtml(p)}</code> não autenticado <div class="spacer"></div><button class="btn small ghost" onclick="go('connect')">Conectar</button></div>`;
+    ? `<div class="connstat ok">✓ <code>${escapeHtml(p)}</code> ${t('conn_authenticated').replace('{provider}', escapeHtml(p))} <div class="spacer"></div><button class="btn small ghost" onclick="go('connect')">${t('btn_reconnect')}</button></div>`
+    : `<div class="connstat off">✗ <code>${escapeHtml(p)}</code> ${t('conn_not_authenticated').replace('{provider}', escapeHtml(p))} <div class="spacer"></div><button class="btn small ghost" onclick="go('connect')">${t('btn_connect')}</button></div>`;
 
   const dirs = ['upload','download','bisync'].map(d=>{
     let label, note;
     if(d==='upload'){
-      label='⬆︎ Upload — local → nuvem (nunca apaga na nuvem)';
-      note='Copia para a nuvem. Nunca apaga nada na nuvem (não destrutivo por padrão).';
+      label=t('dir_upload_label');
+      note=t('dir_upload_note');
     } else if(d==='download'){
-      label='⬇︎ Download — nuvem → local (nunca apaga no local)';
-      note='Copia para o local. Nunca apaga nada no local (não destrutivo por padrão).';
+      label=t('dir_download_label');
+      note=t('dir_download_note');
     } else {
-      label='⇄ Bidirecional — DESTRUTIVO: propaga deleções';
-      note='Atenção: bisync propaga exclusões nos dois lados (apagar num lado apaga no outro). Conflito de conteúdo = aborta (--conflict-resolve none). Para só copiar sem apagar nada, use Upload/Download.';
+      label=t('dir_bisync_label');
+      note=t('dir_bisync_note');
     }
     const sel = s.direction===d?'sel':'';
     const disabled = (d==='bisync' && mirror) ? ' disabled' : '';
@@ -92,90 +92,91 @@ function renderPane(){
   // Mirror warning box text (where deleted/extras go).
   let mirrorWhere = '';
   if(directionOneWay(s.direction)==='upload'){
-    mirrorWhere = `<code>${escapeHtml(p)}:.gdrv-deleted/<UTC-ts></code> (pasta na RAIZ da nuvem, irmã do destino — nunca dentro dele).`;
+    mirrorWhere = `<code>${escapeHtml(p)}:.gdrv-deleted/<UTC-ts></code> (${t('cloud_root_upload_where')})`;
   } else if(directionOneWay(s.direction)==='download'){
-    mirrorWhere = `<code>./data/deleted/${escapeHtml(p)}/<UTC-ts></code> (lado local, visível no volume ./data).`;
+    mirrorWhere = `<code>./data/deleted/${escapeHtml(p)}/<UTC-ts></code> (${t('cloud_root_download_where')})`;
   }
   const rootIsSelected = (remoteVal === `${p}:`) || remoteVal === '';
   const rootDanger = mirror && s.direction==='upload' && rootIsSelected
-    ? `<div style="color:var(--err);margin-top:6px;font-size:11.5px"><strong>⚠ Perigo:</strong> remoto é a raiz do provedor (<code>${escapeHtml(p)}:</code>). Com espelho+upload, <em>todo</em> o conteúdo da nuvem se torna destino e arquivos extras são movidos para o backup-dir na nuvem.</div>`
+    ? `<div style="color:var(--err);margin-top:6px;font-size:11.5px"><strong>${t('root_danger_strong')}:</strong> ${t('root_danger_remote').replace('{provider}', escapeHtml(p))} ${t('root_danger_body')}</div>`
     : '';
 
+  const editNote = s.enabled ? t('local_hub_edit_note') : '';
   document.getElementById('tabpane').innerHTML = `
     ${connHtml}
     <div class="row" style="margin-top:14px">
       <div style="flex:1">
-        <label class="f">Pasta local (dentro de /sync)</label>
+        <label class="f">${t('label_local_folder')}</label>
         <div class="row">
           <input type="text" id="localsub-${p}" value="${escapeAttr(localSub)}" ${s.enabled?'readonly':''}>
         </div>
-        <div style="font-size:11px;color:var(--muted);margin-top:4px">Criada automaticamente no volume LOCAL_SYNC_DIR. Padrão: uma por provedor (independentes). <b>Hub:</b> use o MESMO nome em várias abas para copiar a mesma pasta para todas as nuvens selecionadas${s.enabled?' (edite desabilitando a tarefa)':''}.</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">${t('local_folder_help').replace('{edit_note}', editNote)}</div>
       </div>
       <div style="flex:1">
-        <label class="f">Pasta na nuvem</label>
+        <label class="f">${t('label_cloud_folder')}</label>
         <div class="row">
           <input type="text" id="remote-${p}" value="${remoteEscaped}" placeholder="${placeholderEscaped}">
-          <button class="btn ghost" onclick="openBrowse('${p}')" ${!connected?'disabled':''}>📁 Navegar</button>
+          <button class="btn ghost" onclick="openBrowse('${p}')" ${!connected?'disabled':''}>${t('btn_browse')}</button>
         </div>
         ${connected && (remoteVal === '' || remoteVal === p+':')
-          ? `<button class="btn small ghost" style="margin-top:6px" onclick="useDedicated('${p}', this)">📦 Criar/usar pasta dedicada "${DEDICATED}"</button>` : ''}
-        <div style="font-size:11px;color:var(--muted);margin-top:4px">Vazio (<code>${escapeHtml(p)}:</code>) = raiz do provedor — evite (todo o Drive vira destino).</div>
+          ? `<button class="btn small ghost" style="margin-top:6px" onclick="useDedicated('${p}', this)">${t('btn_dedicated').replace('{dedicated}', DEDICATED)}</button>` : ''}
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">${t('cloud_root').replace('{provider}', escapeHtml(p))}</div>
         <div id="ded-warn-${p}" class="warnbox" style="margin-top:6px"></div>
       </div>
     </div>
-    <label class="f" style="margin-top:16px">Direção</label>
+    <label class="f" style="margin-top:16px">${t('label_direction')}</label>
     <div class="dirs">${dirs}</div>
     ${!mirrorAllowed && mirror
-      ? `<div class="warnbox show" style="color:var(--err)">Modo espelho não é permitido em direção Bidirecional.</div>`
+      ? `<div class="warnbox show" style="color:var(--err)">${t('mirror_not_allowed_bisync')}</div>`
       : ''}
     <div class="row" style="margin-top:14px">
       <div style="flex:1;display:flex;align-items:center;gap:10px">
         <label class="toggle" style="margin:0">
           <input type="checkbox" id="mirror-${p}" ${mirror?'checked':''} ${!mirrorAllowed?'disabled':''} onchange="toggleMirror('${p}')"><span></span>
         </label>
-        <span style="font-size:12.5px;color:var(--text)"><strong>Modo espelho</strong> (pode apagar no destino)</span>
+        <span style="font-size:12.5px;color:var(--text)"><strong>${t('label_mirror')}</strong></span>
       </div>
     </div>
     <div class="warnbox ${(mirror && mirrorAllowed)?'show':''}" id="mirror-warn-${p}">
-      ⚠️ <strong>Modo espelho ativo:</strong> arquivos que existem no destino mas não na origem serão <strong>movidos</strong> (não apagados) para o backup-dir: ${mirrorWhere}
+      ${t('mirror_active').replace('{where}', mirrorWhere)}
       ${rootDanger}
       <div style="margin-top:8px">
         <label class="toggle" style="margin:0;display:inline-flex;align-items:center">
           <input type="checkbox" id="mirror-confirm-${p}" ${mirror?'':'disabled'} onchange="toggleMirrorConfirm('${p}')"><span></span>
         </label>
-        <span style="font-size:12px;color:var(--warn);margin-left:8px"><strong>Entendo e quero ativar</strong> (obrigatório para salvar com espelho)</span>
+        <span style="font-size:12px;color:var(--warn);margin-left:8px"><strong>${t('mirror_confirm_label')}</strong></span>
       </div>
     </div>
     <div class="row" style="margin-top:18px">
       <div style="flex:1">
-        <label class="f">Intervalo (min) — mínimo recomendado 5</label>
+        <label class="f">${t('label_interval')}</label>
         <input type="number" id="interval-${p}" value="${escapeAttr(s.interval_min||5)}" min="5">
       </div>
       <div style="margin-left:auto;text-align:center">
-        <label class="f">Sync habilitado</label>
+        <label class="f">${t('label_sync_enabled')}</label>
         <label class="toggle"><input type="checkbox" id="enabled-${p}" ${s.enabled?'checked':''} ${!canEnable?'disabled':''}><span></span></label>
-        ${!canEnable?'<div style="color:var(--warn);font-size:11px;margin-top:4px">Conecte a nuvem primeiro para habilitar.</div>':''}
+        ${!canEnable?'<div style="color:var(--warn);font-size:11px;margin-top:4px">'+t('connect_first')+'</div>':''}
       </div>
-      <button class="btn" onclick="saveSettings('${p}')" style="margin-left:20px">Salvar</button>
-      <button class="btn ghost" onclick="previewCmd('${p}')" style="margin-left:8px">🔍 Prévia (dry-run)</button>
+      <button class="btn" onclick="saveSettings('${p}')" style="margin-left:20px">${t('btn_save')}</button>
+      <button class="btn ghost" onclick="previewCmd('${p}')" style="margin-left:8px">${t('btn_preview')}</button>
     </div>
     <div class="warnbox show" id="warn-${p}" style="${canEnable||!s.enabled?'display:none':'display:block'}">
-      🔑 <code>${escapeHtml(p)}</code> não está autenticado — habilite apenas após conectar (aba "Conectar Nuvem").
+      ${t('warn_not_auth').replace('{provider}', escapeHtml(p))}
     </div>
 
     <!-- Dry-run preview panel -->
     <div class="card cmdprev" id="preview-panel-${p}" style="margin-top:16px;display:none">
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-        <b style="color:var(--text)">🔍 Prévia (dry-run — nada é alterado)</b>
+        <b style="color:var(--text)">${t('preview_title')}</b>
         <span id="preview-count-${p}" style="font-size:12px;color:var(--muted)"></span>
       </div>
       <div id="preview-deletions-note-${p}" style="color:var(--err);font-size:11.5px;margin-bottom:6px;display:none">
-        ⚠ Há <span id="preview-del-num-${p}"></span> deleção(ões) previstas. Com espelho ativo, estas vão para o backup-dir (não são apagadas de verdade). Sem espelho, cópia nunca deleta.
+        ${t('preview_deletions_note').replace('{n}', '<span id="preview-del-num-${p}"></span>')}
       </div>
       <pre style="background:#0b0f18;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:11px;line-height:1.5;overflow-x:auto;color:#9fb0d0;max-height:260px" id="preview-lines-${p}"></pre>
     </div>
 
-    <div class="card cmdprev" style="margin-top:18px"><b style="color:var(--text)">Comando efetivo (preview)</b><br>
+    <div class="card cmdprev" style="margin-top:18px"><b style="color:var(--text)">${t('preview_effective_cmd')}</b><br>
       <code>${escapeHtml(cmdFor(s.direction, local, remoteVal||remotePlaceholder, s.mirror))}</code></div>
   `;
 }
@@ -204,7 +205,7 @@ async function saveSettings(p){
   const mirror = mirrorCb ? mirrorCb.checked : false;
   // Server enforces: mirror requires confirm_mirror. Give a friendly client alert too.
   if(mirror && (!confirmCb || !confirmCb.checked)){
-    alert('Marque "Entendo e quero ativar" antes de salvar com Modo espelho.');
+    alert(t('alert_mirror_confirm'));
     return;
   }
   const btn = event && event.target ? event.target : null;
@@ -212,7 +213,7 @@ async function saveSettings(p){
   if(btn) btn.textContent='Salvando…';
   const enabled = document.getElementById('enabled-'+p).checked;
   if(enabled && !state[p].connected){
-    alert('Conecte '+LABELS[p]+' primeiro antes de habilitar o sync.');
+    alert(t('alert_connect_first').replace('{label}', LABELS[p]));
     if(btn) btn.textContent=orig;
     return;
   }
@@ -243,12 +244,12 @@ async function saveSettings(p){
       renderPane();
       setTimeout(()=>{if(btn) btn.textContent=orig;}, 900);
     } else {
-      alert(j.error||j.detail||'Falha ao salvar');
+      alert(j.error||j.detail||t('alert_save_fail'));
       if(btn) btn.textContent=orig;
     }
   }catch(e){
     if(btn) btn.textContent=orig;
-    alert('Erro de rede ao salvar');
+    alert(t('alert_network_save'));
   }
 }
 
@@ -268,7 +269,7 @@ function cmdFor(dir, local, remote, mirror){
   if(dir==='download') return mirror
     ? `rclone sync ${remote} ${local} --backup-dir ./data/deleted/<prov>/<ts>`
     : `rclone copy ${remote} ${local}`;
-  return `rclone bisync ${local} ${remote} --conflict-resolve none (1ª exec/ após queda: --resync)`;
+  return `rclone bisync ${local} ${remote} --conflict-resolve none ${t('bisync_first_run_note')}`;
 }
 
 async function previewCmd(p){
@@ -280,7 +281,7 @@ async function previewCmd(p){
   const delNum = document.getElementById('preview-del-num-'+p);
   if(!panel) return;
   panel.style.display = 'block';
-  linesEl.textContent = 'Rodando prévia (dry-run)…';
+  linesEl.textContent = t('preview_running');
   countEl.textContent = '';
   delNote.style.display = 'none';
   try{
@@ -294,24 +295,24 @@ async function previewCmd(p){
     const j = await r.json();
     if(!r.ok){
       const msg = j.error === 'mirror_root_not_allowed'
-        ? '⛔ Espelho + upload para a RAIZ do provedor é bloqueado. Escolha uma subpasta.'
+        ? t('preview_blocked_root')
         : (j.error === 'mirror_not_allowed_for_bisync'
-            ? '⛔ Espelho não é permitido na direção Bidirecional.'
-            : '⛔ Prévia indisponível: '+(j.error||r.status));
+            ? t('preview_blocked_bisync')
+            : t('preview_unavailable').replace('{error}', j.error||r.status));
       linesEl.textContent = msg; countEl.textContent=''; delNote.style.display='none';
       return;
     }
     linesEl.textContent = (j.cmd||[]).join('\n') + '\n\n' + (j.lines||[]).join('\n');
-    countEl.textContent = `${j.transfers||0} cópias · ${j.deletions||0} deleções`;
+    countEl.textContent = t('preview_counts').replace('{n}', j.transfers||0).replace('{m}', j.deletions||0);
     if(j.deletions && j.deletions>0){
       delNote.style.display = 'block';
       delNum.textContent = j.deletions;
     }
     if(!j.ok && j.rc){
-      linesEl.textContent = '⚠ rclone rc='+j.rc+'\n'+linesEl.textContent;
+      linesEl.textContent = t('preview_rc').replace('{rc}', j.rc)+'\n'+linesEl.textContent;
     }
   }catch(e){
-    linesEl.textContent = 'Erro ao gerar prévia: '+String(e);
+    linesEl.textContent = t('preview_error').replace('{error}', String(e));
   }
 }
 
@@ -334,7 +335,7 @@ window.addEventListener('message', ev=>{
 /* ---------- dedicated folder ---------- */
 async function useDedicated(p, btn){
   const warn = document.getElementById('ded-warn-'+p);
-  btn.disabled = true; btn.textContent='Criando…';
+  btn.disabled = true; btn.textContent=t('btn_creating');
   try{
     const ctrl = new AbortController();
     const to = setTimeout(()=>ctrl.abort(), 60000);
@@ -342,18 +343,18 @@ async function useDedicated(p, btn){
     clearTimeout(to);
     const j = await r.json();
     if(!r.ok || !j.ok){
-      if(warn){ warn.textContent = '⛔ '+(j.detail||j.error||'falhou'); warn.classList.add('show'); }
-      btn.disabled=false; btn.textContent=`📦 Criar/usar pasta dedicada "${DEDICATED}"`;
+      if(warn){ warn.textContent = '⛔ '+(j.detail||j.error||t('alert_save_fail')); warn.classList.add('show'); }
+      btn.disabled=false; btn.textContent=t('btn_dedicated').replace('{dedicated}', DEDICATED);
       return;
     }
     state[p].remote = j.remote;
     renderPane();
     const w2 = document.getElementById('ded-warn-'+p);
     if(w2){ w2.classList.add('show');
-      w2.textContent = j.warning ? ('⚠ '+j.warning) : `✅ Pasta dedicada criada/selecionada: ${j.remote}`; }
+      w2.textContent = j.warning ? ('⚠ '+j.warning) : t('ded_created').replace('{remote}', j.remote); }
   }catch(e){
-    if(warn){ warn.textContent = '⛔ Erro de rede: '+e; warn.classList.add('show'); }
-    btn.disabled=false; btn.textContent=`📦 Criar/usar pasta dedicada "${DEDICATED}"`;
+    if(warn){ warn.textContent = t('ded_network_error').replace('{error}', e); warn.classList.add('show'); }
+    btn.disabled=false; btn.textContent=t('btn_dedicated').replace('{dedicated}', DEDICATED);
   }
 }
 

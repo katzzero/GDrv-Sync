@@ -2,14 +2,12 @@
 {% block content %}
 <section class="view active" id="view-browse">
     <div class="card">
-        <h2>Selecionar pasta — {{ provider }} <span id="navStatus" style="display:none;color:var(--accent);font-size:12px;font-weight:400;margin-left:8px">Carregando…</span></h2>
-        <div class="sub">
-            Somente pastas. Clique para entrar; use <b>Selecionar esta pasta</b> para escolher a mostrada no caminho abaixo.
-        </div>
+        <h2>{{ t('browse_title').replace('{provider}', provider) }} <span id="navStatus" style="display:none;color:var(--accent);font-size:12px;font-weight:400;margin-left:8px">{{ t('browse_loading') }}</span></h2>
+        <div class="sub">{{ t('browse_sub') }}</div>
 
         {% if not connected %}
         <div style="color:var(--err);margin-bottom:12px">
-            ⚠️ {{ provider }} não está autenticado. Conecte-o primeiro em "Conectar Nuvem".
+            {{ t('browse_not_auth').replace('{provider}', provider) }}
         </div>
         {% endif %}
 
@@ -20,20 +18,20 @@
         <!-- Breadcrumb clicável + opção raiz -->
         <div class="crumbs" id="crumbs">
             {% if path %}
-            <a href="?provider={{ provider }}">🏠 raiz ({{ provider }})</a>
+            <a href="?provider={{ provider }}">{{ t('browse_root').replace('{provider}', provider) }}</a>
             {% set parts = path.split('/') %}
             {% for i in range(parts|length) %}
             / <a href="?provider={{ provider }}&path={{ parts[:loop.index]|join('/') }}">{{ parts[loop.index0] }}</a>
             {% endfor %}
             {% else %}
-            <span>🏠 raiz do provedor (<code>{{ provider }}:</code>)</span>
+            <span>{{ t('browse_root_provider').replace('{provider}', provider) }}</span>
             {% endif %}
         </div>
 
         <div class="folderlist" id="folderlist" data-folders='{{ folders | tojson | safe }}'>
             {% if connected and folders is not none %}
             <div class="fitem root-item" onclick="goRoot()">
-                <span class="ico">🏠</span><span class="nm">🏠 raiz ({{ provider }})</span>
+                <span class="ico">🏠</span><span class="nm">{{ t('browse_root').replace('{provider}', provider) }}</span>
             </div>
             {% for folder in folders %}
             <div class="fitem" onclick="goFolder({{ loop.index0 }})">
@@ -41,18 +39,18 @@
             </div>
             {% endfor %}
             {% if folders|length == 0 %}
-            <div style="color:var(--muted);padding:12px">Nenhuma pasta encontrada.</div>
+            <div style="color:var(--muted);padding:12px">{{ t('browse_no_folders') }}</div>
             {% endif %}
             {% elif not connected %}
-            <div style="color:var(--muted);padding:12px">Conecte a nuvem primeiro para listar pastas.</div>
+            <div style="color:var(--muted);padding:12px">{{ t('browse_connect_first') }}</div>
             {% else %}
-            <div style="color:var(--muted);padding:12px">Nenhuma pasta encontrada.</div>
+            <div style="color:var(--muted);padding:12px">{{ t('browse_no_folders') }}</div>
             {% endif %}
         </div>
 
         <div class="mfoot" style="margin-top:12px">
             <button class="btn" onclick="selectHere()" id="btnSel" {% if not connected %}disabled{% endif %}>
-                Selecionar esta pasta
+                {{ t('btn_select_here') }}
             </button>
             <span id="selLabel" style="margin-left:12px;color:var(--muted);font-size:12px">
                 {{ provider }}:{{ path }}
@@ -61,6 +59,7 @@
     </div>
 </section>
 <script>
+// i18n already embedded by base.html (window.__I18N, window.__LANG, t()).
 const PROVIDER = {{ provider|tojson }};
 let currentPath = {{ path|tojson }};
 const FOLDERS = JSON.parse(document.getElementById('folderlist').dataset.folders || '[]');
@@ -74,7 +73,7 @@ function lockList(clickedEl){
   list.style.pointerEvents = 'none';
   if(clickedEl){ clickedEl.style.opacity='1'; clickedEl.style.background='rgba(79,140,255,.25)'; }
   const st = document.getElementById('navStatus');
-  if(st){ st.textContent = 'Carregando…'; st.style.display='inline'; }
+  if(st){ st.textContent = t('browse_loading'); st.style.display='inline'; }
 }
 
 function goRoot(){ if(navigating) return; currentPath=''; lockList(document.querySelector('.root-item')); navigate(); }

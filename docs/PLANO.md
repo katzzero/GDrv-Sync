@@ -10,6 +10,8 @@ Providers v1: **Google Drive (`gdrive`), Dropbox (`dropbox`), OneDrive Personal 
 ┌─────────────────────────── container: gdrv-sync ───────────────────────────┐
 │  FastAPI (uvicorn :8080)                                                 │
 │   ├─ UI HTML (Jinja2): Settings com ABAS por provedor / Status / Connect │
+│   │   └─ i18n: pt-BR padrão + EN toggle no header (cookie gdrv_lang);     │
+│   │       templates + JS strings + mensagens da API localizadas (i18n.py)│
 │   ├─ /api/settings  → grava /data/settings.json (3 tarefas)              │
 │   ├─ /browse        → rclone lsd <remote>:... (picker, aba ativa)        │
 │   ├─ /connect       → rclone authorize <provider> → OAuth no browser     │

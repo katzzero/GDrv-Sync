@@ -15,6 +15,9 @@
         .badge.ok{color:var(--ok);border-color:var(--ok)}
         .badge.off{color:var(--err);border-color:var(--err)}
         header .spacer{flex:1}
+        .langbtn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer}
+        .langbtn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+        .langbtn:hover{border-color:var(--accent)}
         main{display:flex;max-width:1150px;margin:0 auto;padding:22px;gap:22px}
         nav{width:170px;flex-shrink:0}
         nav button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--muted);font:inherit;padding:10px 14px;border-radius:8px;cursor:pointer;margin-bottom:4px}
@@ -105,17 +108,35 @@
 <header>
     <div class="logo">gdrv<span>·</span>sync</div>
     <span id="provBadges" style="display:flex;gap:8px"></span>
-    <span class="badge {% if healthz_ok %}ok{% else %}off{% endif %}" id="healthBadge" title="GET /healthz">container: {% if healthz_ok %}healthy{% else %}degraded{% endif %}</span>
+    <span class="badge {% if healthz_ok %}ok{% else %}off{% endif %}" id="healthBadge" title="{{ t('healthz_title') }}">container: {% if healthz_ok %}{{ t('header_healthy') }}{% else %}{{ t('header_degraded') }}{% endif %}</span>
     <div class="spacer"></div>
+    <div id="langToggle" style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)">
+        <span style="color:var(--muted)">{{ t('lang_label') }}</span>
+        <button class="langbtn {% if lang == 'pt' %}active{% endif %}" onclick="setLang('pt')">{{ t('lang_pt') }}</button>
+        <button class="langbtn {% if lang == 'en' %}active{% endif %}" onclick="setLang('en')">{{ t('lang_en') }}</button>
+    </div>
 </header>
 <main>
     <nav>
-        <button data-view="settings" onclick="go('settings')">⚙ Configurações</button>
-        <button data-view="connect" onclick="go('connect')">🔑 Conectar</button>
-        <button data-view="status" onclick="go('status')">📊 Status</button>
-        <div class="navsub">Volumes</div>
-        <div style="font-size:11px;color:var(--muted);padding:4px 14px">./data → /data<br>LOCAL_SYNC_DIR → /sync</div>
+        <button data-view="settings" onclick="go('settings')">{{ t('nav_settings') }}</button>
+        <button data-view="connect" onclick="go('connect')">{{ t('nav_connect') }}</button>
+        <button data-view="status" onclick="go('status')">{{ t('nav_status') }}</button>
+        <div class="navsub">{{ t('navsub_volumes') }}</div>
+        <div style="font-size:11px;color:var(--muted);padding:4px 14px">{{ t('vol_data') }}<br>{{ t('vol_sync') }}</div>
     </nav>
+<script>
+// i18n (embedded by the server): window.__I18N = {pt:{...}, en:{...}, lang:'pt'|'en'}.
+window.__I18N = {{ i18n_json | safe }};
+window.__LANG = window.__I18N.lang;
+function t(k){
+  const dict = (window.__I18N && window.__I18N[window.__LANG]) || {};
+  return dict[k] || k;
+}
+function setLang(lang){
+  document.cookie = `gdrv_lang=${lang};path=/;max-age=31536000`;
+  location.reload();
+}
+</script>
     {% block content %}{% endblock %}
 </main>
 <script>
@@ -130,18 +151,18 @@ function go(v){ if(VIEWS[v] && location.pathname!==VIEWS[v]) location.href=VIEWS
   });
 })();
 // Poll /healthz every 30s: container badge + per-provider badges.
-const PLABELS={gdrive:'Google Drive',dropbox:'Dropbox',onedrive:'OneDrive'};
+const PLABELS={gdrive:t('nav_connect'),dropbox:t('nav_connect'),onedrive:t('nav_connect')};
 async function pollHealth(){
   try{
     const r=await fetch('/healthz'); const j=await r.json();
     const b=document.getElementById('healthBadge');
-    if(j.ok){b.className='badge ok';b.textContent='container: healthy';}
-    else {b.className='badge off';b.textContent='container: degraded';}
+    if(j.ok){b.className='badge ok';b.textContent=t('header_healthy');}
+    else {b.className='badge off';b.textContent=t('header_degraded');}
     const pb=document.getElementById('provBadges');
     if(pb && j.providers){
       pb.innerHTML=Object.entries(j.providers).map(([k,v])=>{
         const cls=v.connected?'badge ok':'badge off';
-        return `<span class="${cls}" title="${PLABELS[k]||k}">${k} ${v.connected?'✓':'✗'}</span>`;
+        return `<span class="${cls}" title="${t('nav_connect')}">${k} ${v.connected?'✓':'✗'}</span>`;
       }).join('');
     }
   }catch(e){}

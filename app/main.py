@@ -24,6 +24,8 @@ from .rclone_ops import (
 )
 from .callback_proxy import start_callback_proxy
 from .scheduler import scheduler, SETTINGS_PATH
+from .i18n import LANGS, get_lang, t
+import json as _json
 
 app = FastAPI()
 log = logging.getLogger("gdrv-sync")
@@ -59,17 +61,17 @@ def save_settings_atomic(settings: Dict[str, Any]) -> None:
     scheduler._reload_settings_if_changed()
 
 
-def validate_provider(provider: Optional[str]) -> str:
+def validate_provider(provider: Optional[str], lang: str = "pt") -> str:
     """Validate provider against the 3 allowed values; raise 400 otherwise."""
     if provider not in PROVIDERS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown provider: {provider!r}. Allowed: {sorted(PROVIDERS)}",
+            detail=t("api_invalid_provider", lang),
         )
     return provider
 
 
-def normalize_remote(provider: str, remote: Optional[str]) -> str:
+def normalize_remote(provider: str, remote: Optional[str], lang: str = "pt") -> str:
     """Normalize a remote value: empty -> provider root; must start with f'{provider}:'.
 
     Returns the normalized value, or raises HTTPException(400) for unsafe values
@@ -86,31 +88,28 @@ def normalize_remote(provider: str, remote: Optional[str]) -> str:
         return remote
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail=(
-            f"Invalid remote for {provider}: {remote!r}. "
-            f"Leave empty for provider root, or use '{prefix}/path'."
-        ),
+        detail=t("api_invalid_remote", lang).format(provider=provider, remote=remote),
     )
 
 
-def parse_interval(value: Any) -> int:
+def parse_interval(value: Any, lang: str = "pt") -> int:
     """Parse interval_min; raise HTTPException(400) on non-int (L2)."""
     try:
         iv = int(value)
     except (TypeError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"interval_min must be an integer >= 5, got {value!r}",
+            detail=t("api_interval_not_int", lang).format(value=value),
         )
     if iv < 5:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"interval_min must be >= 5, got {iv}",
+            detail=t("api_interval_too_low", lang).format(value=iv),
         )
     return iv
 
 
-def parse_local_sub(value: Any, provider: str) -> str:
+def parse_local_sub(value: Any, provider: str, lang: str = "pt") -> str:
     """Validate a configurable per-provider local folder name (hub/independent).
 
     Safe ASCII names only: no '/', no '..', cannot start with '.', max 64 chars.
@@ -122,18 +121,17 @@ def parse_local_sub(value: Any, provider: str) -> str:
     if name != name.strip() or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _\-]{0,63}", name):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=("local folder must be 1-64 chars: letters/digits/space/_/-, "
-                    "starting with alnum; no '/' or '..' (e.g. 'Gdrive')"),
+            detail=t("api_invalid_local_sub", lang),
         )
     return name
 
-def parse_direction(value: Any) -> str:
+def parse_direction(value: Any, lang: str = "pt") -> str:
     """Allow-list direction (L2)."""
     d = str(value or "bisync")
     if d not in ("upload", "download", "bisync"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"direction must be one of upload/download/bisync, got {d!r}",
+            detail=t("api_invalid_direction", lang).format(value=d),
         )
     return d
 
@@ -157,54 +155,64 @@ def sanitize_rclone_output(text: str, max_lines: int = 10) -> str:
     return "\n".join(_redact(text.splitlines())[:max_lines])
 
 
+def _template_ctx(request: Request, extra: Dict[str, Any]) -> Dict[str, Any]:
+    """Common template context for every HTML page: language + translate
+    helper + the i18n dictionary (embedded as JSON for the JS side)."""
+    lang = get_lang(request)
+    return {
+        "request": request,
+        "lang": lang,
+        "t": lambda k: t(k, lang),
+        "i18n_json": _json.dumps({"pt": LANGS["pt"], "en": LANGS["en"], "lang": lang}),
+        **extra,
+    }
+
+
 # --------------------------------------------------------------------------- HTML pages
 
 @app.get("/", response_class=HTMLResponse)
 async def settings_page(request: Request):
     settings = load_settings()
     providers_state = scheduler.get_state()
-    return templates.TemplateResponse(request, "settings.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "settings.html", _template_ctx(request, {
         "providers": PROVIDERS,
         "settings": settings,
         "state": providers_state,
         "rclone_version": get_rclone_version(),
         "healthz_ok": True,
-    })
+    }))
 
 
 @app.get("/connect", response_class=HTMLResponse)
 async def connect_page(request: Request):
     settings = load_settings()
     providers_state = scheduler.get_state()
-    return templates.TemplateResponse(request, "connect.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "connect.html", _template_ctx(request, {
         "providers": PROVIDERS,
         "settings": settings,
         "state": providers_state,
         "rclone_version": get_rclone_version(),
         "healthz_ok": True,
-    })
+    }))
 
 
 @app.get("/status", response_class=HTMLResponse)
 async def status_page(request: Request):
     history = scheduler.get_history()
     providers_state = scheduler.get_state()
-    return templates.TemplateResponse(request, "status.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "status.html", _template_ctx(request, {
         "providers": PROVIDERS,
         "history": history,
         "state": providers_state,
         "rclone_version": get_rclone_version(),
         "healthz_ok": True,
-    })
+    }))
 
 
 @app.get("/browse", response_class=HTMLResponse)
 async def browse_page(request: Request, provider: str = "", path: str = ""):
     """Browse picker page (rendered via Jinja2, not generated in Python)."""
-    validate_provider(provider)
+    validate_provider(provider, get_lang(request))
     connected = section_present(provider)
     folders = []
     error = None
@@ -216,8 +224,7 @@ async def browse_page(request: Request, provider: str = "", path: str = ""):
             error = err
         else:
             folders = dirs
-    return templates.TemplateResponse(request, "browse.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "browse.html", _template_ctx(request, {
         "provider": provider,
         "path": path,
         "connected": connected,
@@ -225,7 +232,7 @@ async def browse_page(request: Request, provider: str = "", path: str = ""):
         "error": error,
         "rclone_version": get_rclone_version(),
         "healthz_ok": True,
-    })
+    }))
 
 
 # --------------------------------------------------------------------------- /healthz
@@ -276,12 +283,13 @@ async def healthz():
 @app.post("/api/settings")
 async def api_save_settings(request: Request):
     data = await request.json()
-    provider = validate_provider(data.get("provider"))
+    lang = get_lang(request)
+    provider = validate_provider(data.get("provider"), lang)
 
     enabled = bool(data.get("enabled", False))
-    direction = parse_direction(data.get("direction"))
-    interval_min = parse_interval(data.get("interval_min", 5))
-    remote = normalize_remote(provider, data.get("remote"))
+    direction = parse_direction(data.get("direction"), lang)
+    interval_min = parse_interval(data.get("interval_min", 5), lang)
+    remote = normalize_remote(provider, data.get("remote"), lang)
 
     mirror = bool(data.get("mirror", False))
     confirm_mirror = bool(data.get("confirm_mirror", False))
@@ -290,7 +298,7 @@ async def api_save_settings(request: Request):
     if mirror and not confirm_mirror:
         return JSONResponse(
             {"ok": False, "error": "confirm_required",
-             "detail": "Ative a confirmação 'Entendo e quero ativar' antes de salvar o modo espelho."},
+             "detail": t("api_confirm_required", get_lang(request))},
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -298,7 +306,7 @@ async def api_save_settings(request: Request):
     if mirror and direction == "bisync":
         return JSONResponse(
             {"ok": False, "error": "mirror_not_allowed_for_bisync",
-             "detail": "Modo espelho não é permitido em direção Bidirecional."},
+             "detail": t("api_mirror_not_allowed_bisync", get_lang(request))},
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -308,9 +316,7 @@ async def api_save_settings(request: Request):
     if mirror and direction == "upload" and remote == f"{provider}:":
         return JSONResponse(
             {"ok": False, "error": "mirror_root_not_allowed",
-             "detail": "Modo espelho com upload para a RAIZ do provedor é bloqueado "
-                       "(toda a nuvem seria destino e o backup sobreporia o destino). "
-                       "Escolha uma subpasta."},
+             "detail": t("api_mirror_root_not_allowed", get_lang(request))},
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -319,7 +325,7 @@ async def api_save_settings(request: Request):
         "direction": direction,
         "interval_min": interval_min,
         "remote": remote,
-        "local_sub": parse_local_sub(data.get("local_sub"), provider),
+        "local_sub": parse_local_sub(data.get("local_sub"), provider, lang),
         "mirror": mirror,
     }
 
@@ -327,8 +333,7 @@ async def api_save_settings(request: Request):
     if enabled and not section_present(provider):
         return JSONResponse(
             {"ok": False,
-             "error": f"Cannot enable {provider}: remote not authenticated. "
-                      "Connect it first (Conectar Nuvem)."},
+             "error": t("api_not_authenticated", lang).format(provider=provider)},
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -347,15 +352,16 @@ async def api_preview(request: Request):
     import asyncio
     from datetime import datetime
     data = await request.json()
-    provider = validate_provider(data.get("provider"))
+    lang = get_lang(request)
+    provider = validate_provider(data.get("provider"), lang)
     # Fall back to the SAVED settings for any field the caller omits — never
     # silently preview "upload from provider root" (footgun: targets whole drive).
     saved = scheduler.get_settings().get("providers", {}).get(provider, {})
-    direction = parse_direction(data.get("direction") or saved.get("direction", "upload"))
+    direction = parse_direction(data.get("direction") or saved.get("direction", "upload"), lang)
     remote_input = data.get("remote")
     if remote_input is None or remote_input == "":
         remote_input = saved.get("remote", "")
-    remote = normalize_remote(provider, remote_input)
+    remote = normalize_remote(provider, remote_input, lang)
     mirror = bool(data.get("mirror", saved.get("mirror", False)))
     local_sub = saved.get("local_sub") or PROVIDERS[provider]["local_sub"]
     local_path = str(Path(SYNC_DIR) / local_sub)
@@ -429,7 +435,8 @@ async def api_use_dedicated(request: Request):
     """
     import asyncio
     data = await request.json()
-    provider = validate_provider(data.get("provider"))
+    lang = get_lang(request)
+    provider = validate_provider(data.get("provider"), lang)
 
     settings = load_settings()
     saved = settings.get("providers", {}).get(provider, {})
@@ -437,19 +444,19 @@ async def api_use_dedicated(request: Request):
     if remote not in ("", f"{provider}:"):
         return JSONResponse(
             {"ok": False, "error": "remote_already_set",
-             "detail": f"remote atual é '{remote}'; a pasta dedicada só é sugerida quando o destino é a raiz."},
+             "detail": t("api_ded_remote_set", lang).format(remote=remote)},
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     if saved.get("enabled"):
         return JSONResponse(
             {"ok": False, "error": "task_enabled",
-             "detail": "desabilite a tarefa antes de trocar o destino para a pasta dedicada."},
+             "detail": t("api_ded_task_enabled", lang)},
             status_code=status.HTTP_400_BAD_REQUEST,
         )
     if not section_present(provider):
         return JSONResponse(
             {"ok": False, "error": "not_connected",
-             "detail": "conecte o provedor primeiro."},
+             "detail": t("api_ded_not_connected", lang)},
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -458,7 +465,7 @@ async def api_use_dedicated(request: Request):
     if rc != 0:
         return JSONResponse(
             {"ok": False, "error": "mkdir_failed",
-             "detail": err or "rclone mkdir falhou (escopo sem permissão de escrita?)"},
+             "detail": err or t("api_ded_mkdir_failed", lang)},
             status_code=status.HTTP_502_BAD_GATEWAY,
         )
 
@@ -469,11 +476,9 @@ async def api_use_dedicated(request: Request):
 
     warning = None
     if existed[0] is False:
-        warning = (f"A pasta '{DEDICATED_FOLDER}' já existia e CONTEM dados. "
-                   "Revise antes de habilitar Bidirecional ou Espelho — podem alterá-la/apagá-la.")
+        warning = t("api_ded_exists", lang).format(dedicated=DEDICATED_FOLDER)
     elif existed[0] is None and existed[1] not in ("missing",):
-        warning = (f"Não foi possível verificar se '{DEDICATED_FOLDER}' já tinha conteúdo. "
-                   "Confira na UI antes de habilitar modos destrutivos.")
+        warning = t("api_ded_unchecked", lang).format(dedicated=DEDICATED_FOLDER)
 
     return {"ok": True,
             "remote": f"{provider}:{DEDICATED_FOLDER}",
@@ -489,7 +494,8 @@ async def api_get_settings():
 @app.post("/api/connect/start")
 async def connect_start(request: Request):
     data = await request.json()
-    provider = validate_provider(data.get("provider"))
+    lang = get_lang(request)
+    provider = validate_provider(data.get("provider"), lang)
 
     # Optional client_id/client_secret (bring-your-own OAuth app credentials).
     # If one is given without the other -> 400.  Never log them.
@@ -500,7 +506,7 @@ async def connect_start(request: Request):
     if has_cid != has_csec:
         return JSONResponse(
             {"ok": False, "error": "both_required",
-             "detail": "client_id e client_secret devem ser informados juntos (Avançado)."},
+             "detail": t("api_both_required", lang)},
             status_code=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -515,14 +521,14 @@ async def connect_start(request: Request):
     if sess.auth_url:
         return {"auth_url": sess.auth_url, "status": "waiting"}
     return JSONResponse(
-        {"error": "Could not get auth URL", "status": "error",
+        {"error": t("api_auth_url_fail", lang), "status": "error",
          "stdout": sanitize_rclone_output(sess.full_output())},
         status_code=status.HTTP_502_BAD_GATEWAY,
     )
 
 
 @app.get("/api/connect/status")
-async def connect_status(provider: str):
+async def connect_status(request: Request, provider: str):
     """Check OAuth connection status.
 
     Uses the file-based section_present (cached, no subprocess per poll) as the
@@ -531,7 +537,8 @@ async def connect_status(provider: str):
     and return authorized (+ remove session); still running -> waiting; terminal
     without token -> error (+ cleanup session).
     """
-    validate_provider(provider)
+    lang = get_lang(request)
+    validate_provider(provider, lang)
     connected = section_present(provider)
     if connected:
         # success path: cancel any still-running authorize subprocess for this
@@ -560,7 +567,7 @@ async def connect_status(provider: str):
         detail = sanitize_rclone_output(sess.last_lines(20))
         authorize_remove(provider)
         return {"status": "error", "connected": False,
-                "detail": "authorize ended without a token", "stdout": detail}
+                "detail": t("api_auth_no_token", lang), "stdout": detail}
 
     return {"status": "waiting", "connected": False}
 
@@ -568,16 +575,18 @@ async def connect_status(provider: str):
 @app.post("/api/connect/cancel")
 async def connect_cancel(request: Request):
     data = await request.json()
-    provider = validate_provider(data.get("provider"))
+    lang = get_lang(request)
+    provider = validate_provider(data.get("provider"), lang)
     authorize_cancel(provider)
-    return {"ok": True, "message": "Cancelled"}
+    return {"ok": True, "message": t("api_cancelled", lang)}
 
 
 @app.post("/api/connect/complete")
 async def connect_complete(request: Request):
     """Server-side completion: persist captured token to rclone.conf (idempotent)."""
     data = await request.json()
-    provider = validate_provider(data.get("provider"))
+    lang = get_lang(request)
+    provider = validate_provider(data.get("provider"), lang)
     ok, message, _ = authorize_finish(provider)
     if not ok:
         return JSONResponse({"ok": False, "error": message}, status_code=400)
@@ -587,9 +596,10 @@ async def connect_complete(request: Request):
 @app.post("/api/run-now")
 async def run_now(request: Request):
     data = await request.json()
-    provider = validate_provider(data.get("provider"))
+    lang = get_lang(request)
+    provider = validate_provider(data.get("provider"), lang)
     scheduler.enqueue_run_now(provider)
-    return {"ok": True, "message": f"Run enqueued for {provider}"}
+    return {"ok": True, "message": t("api_run_now", lang).format(provider=provider)}
 
 
 # --------------------------------------------------------------------------- lifecycle
