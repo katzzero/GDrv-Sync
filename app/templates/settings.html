@@ -54,7 +54,7 @@ function renderPane(){
   const canEnable = connected;
 
   const connHtml = connected
-    ? `<div class="connstat ok">✓ <code>${escapeHtml(p)}</code> autenticado <div class="spacer"></div><button class="btn small ghost" onclick="go('connect')">Conectar</button></div>`
+    ? `<div class="connstat ok">✓ <code>${escapeHtml(p)}</code> autenticado <div class="spacer"></div><button class="btn small ghost" onclick="go('connect')">Reconectar</button></div>`
     : `<div class="connstat off">✗ <code>${escapeHtml(p)}</code> não autenticado <div class="spacer"></div><button class="btn small ghost" onclick="go('connect')">Conectar</button></div>`;
 
   const dirs = ['upload','download','bisync'].map(d=>{

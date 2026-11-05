@@ -1,14 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="view" id="view-connect">
+<section class="view active" id="view-connect">
     <div class="card">
         <h2>Conectar Nuvem</h2>
         <div class="sub">OAuth no seu navegador — nenhum copiar/colar. Cada provedor conecta de forma independente.</div>
         <div id="connectCards">
+            {% set labels = {'gdrive':'Google Drive','dropbox':'Dropbox','onedrive':'OneDrive'} %}
             {% for provider in ['gdrive', 'dropbox', 'onedrive'] %}
             <div class="pcard" id="card-{{ provider }}">
                 <div class="row">
-                    <b style="flex:1">{{ provider }}</b>
+                    <b style="flex:1">{{ labels[provider] }} <span style="color:var(--muted);font-weight:400">({{ provider }}:)</span></b>
                     <span class="badge {% if state[provider].connected %}ok{% else %}off{% endif %}"
                           id="badge-{{ provider }}">{{ '✓ conectado' if state[provider].connected else 'não conectado' }}</span>
                     <button class="btn{% if state[provider].connected %} ghost{% endif %}" id="btn-{{ provider }}"
