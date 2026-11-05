@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"   # UI (loopback only per PLANO §11)
-      - "127.0.0.1:53682:53682"  # callback OAuth (loopback)
+      - "127.0.0.1:53682:53683"  # callback OAuth (loopback; proxy interno encaminha p/ rclone no 53682 do container)
     volumes:
       - ./data:/data
       - ${LOCAL_SYNC_DIR:-./local}:/sync

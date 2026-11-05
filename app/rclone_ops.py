@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 from typing import Optional, Tuple, Dict, List
 
+from .providers import PROVIDERS as PROVIDER_META
+
 # ---------------------------------------------------------------------------
 # Paths (honor DATA_DIR so the app runs both in-container and locally).
 # ---------------------------------------------------------------------------
@@ -198,13 +200,25 @@ _AUTH_URL_RE = re.compile(r"https?://[^\s]+")
 
 
 def _extract_auth_url(stdout: str) -> Optional[str]:
-    """Find an auth URL, scanning both per-line and the joined buffer."""
-    for line in stdout.splitlines():
-        m = _AUTH_URL_RE.search(line)
-        if m:
-            return m.group(0)
-    m = _AUTH_URL_RE.search(stdout.replace("\n", ""))
-    return m.group(0) if m else None
+    """Find the auth URL, scanning both per-line and the joined buffer.
+
+    rclone prints at least two URLs: the bare redirect base
+    ('"http://127.0.0.1:53682/"' in a NOTICE) and the real auth link
+    ('http://127.0.0.1:53682/auth?state=...'). Prefer the one carrying the
+    state parameter (or an /auth path); strip trailing quote/punctuation.
+    """
+    candidates: List[str] = []
+    for text in stdout.splitlines() + [stdout.replace("\n", "")]:
+        for m in _AUTH_URL_RE.finditer(text):
+            url = m.group(0).rstrip('"\',;<>')
+            if url not in candidates:
+                candidates.append(url)
+    if not candidates:
+        return None
+    for cand in candidates:
+        if "state=" in cand or "/auth" in cand:
+            return cand
+    return candidates[0]
 
 
 def version() -> Optional[str]:
@@ -319,9 +333,17 @@ class AuthorizeSession:
     # -- lifecycle -------------------------------------------------------
 
     def start(self) -> None:
-        """Launch ``rclone authorize`` and begin streaming stdout."""
+        """Launch ``rclone authorize`` and begin streaming stdout.
+
+        ``rclone authorize`` takes a BACKEND name (drive/dropbox/onedrive),
+        not a remote name — map via providers.PROVIDERS[*].rclone_type.
+        There is no ``--port`` flag: it always listens on 127.0.0.1:53682
+        (the callback port published in compose).
+        """
+        backend = PROVIDER_META[self.provider]["rclone_type"]
         cmd = [
-            "rclone", "authorize", self.provider, "--port", str(self.port),
+            "rclone", "authorize", backend,
+            "--auth-no-open-browser",
             "--config", str(RCLONE_CONF),
         ]
         self.proc = subprocess.Popen(
@@ -338,21 +360,26 @@ class AuthorizeSession:
     def _read_loop(self) -> None:
         """Read stdout line by line; detect auth URL and token section."""
         assert self.proc is not None and self.proc.stdout is not None
+        weak_url: Optional[str] = None
         try:
             for line in self.proc.stdout:
                 line = line.rstrip("\n")
                 with self._lock:
                     self._lines.append(line)
-                # Auth URL: rclone prints something like
-                # "If your browser doesn't open automatically go to the following
-                #  link: https://accounts.google.com/..." or a bare https URL.
+                # rclone prints a bare redirect-base NOTICE first
+                # ("... http://127.0.0.1:53682/ ...") and then the real auth
+                # link ("...auth?state=..."). Prefer the strong URL; hold the
+                # weak one only as a fallback if nothing better ever shows.
                 if self.auth_url is None:
                     m = _extract_auth_url(line)
                     if m:
-                        self.auth_url = m
-                        with self._lock:
-                            self.status = "url_ready"
-                        self._url_found.set()
+                        if "state=" in m or "/auth" in m:
+                            self.auth_url = m
+                            with self._lock:
+                                self.status = "url_ready"
+                            self._url_found.set()
+                        elif weak_url is None:
+                            weak_url = m
         except Exception as exc:  # pragma: no cover - defensive
             with self._lock:
                 self.error = str(exc)
@@ -361,20 +388,29 @@ class AuthorizeSession:
             rc = self.proc.wait() if self.proc else -1
             # All lines are now accumulated: capture the token section if present.
             self._capture_token_section()
+            if self.auth_url is None and weak_url:
+                self.auth_url = weak_url
+                self._url_found.set()
             with self._lock:
                 if self.status not in ("done", "cancelled"):
                     self.status = "done" if rc == 0 else "error"
 
     def _capture_token_section(self) -> None:
-        """Capture the [provider] config block (token) from accumulated lines."""
+        """Capture the config block (token) from accumulated lines.
+
+        ``rclone authorize drive`` prints the section as ``[drive]`` (backend
+        name), not ``[gdrive]`` (remote name) — accept both, and normalize the
+        header to the provider (remote) name used across the app.
+        """
         with self._lock:
             lines = list(self._lines)
+        headers = {f"[{self.provider}]", f"[{PROVIDER_META[self.provider]['rclone_type']}]"}
         started = False
         captured: List[str] = []
         for line in lines:
-            if line.strip() == f"[{self.provider}]":
+            if line.strip() in headers:
                 started = True
-                captured.append(line)
+                captured.append(f"[{self.provider}]")
                 continue
             if started:
                 if line.strip() == "" or line.strip().startswith("["):
@@ -513,6 +549,12 @@ def authorize_remove(provider: str) -> None:
     """Drop an in-flight session from the registry (after terminal state)."""
     with _sessions_lock:
         _authorize_sessions.pop(provider, None)
+
+
+def get_authorize_session(provider: str) -> Optional[AuthorizeSession]:
+    """Return the active AuthorizeSession for ``provider`` (or None)."""
+    with _sessions_lock:
+        return _authorize_sessions.get(provider)
 
 
 def write_rclone_section(provider: str, section_text: str) -> bool:

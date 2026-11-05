@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
-      - "127.0.0.1:53682:53682"
+      - "127.0.0.1:53682:53683"
     volumes:
       - ./data:/data
       - ${LOCAL_SYNC_DIR:-./local}:/sync
@@ -36,8 +36,9 @@ docker compose up -d
 
 Open http://localhost:8080 in your browser.
 
-The OAuth callback port `53682` is published on `127.0.0.1` only (loopback) by
-default in docker-compose.
+An internal TCP proxy (`app/callback_proxy.py`) forwards the published host port `53682` to the
+rclone authorize loopback listener (`127.0.0.1:53682` in the container), because Docker
+published ports cannot reach loopback-only listeners inside the container.
 
 ### Local run (without Docker)
 

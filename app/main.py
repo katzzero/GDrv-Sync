@@ -19,8 +19,9 @@ from .rclone_ops import (
     lsd, check_connected, ensure_dirs, section_present, invalidate_section_cache,
     RCLONE_CONF, LOGS_DIR,
     authorize_start, authorize_finish, authorize_cancel, authorize_remove, write_rclone_section,
-    _sessions_lock,
+    get_authorize_session,
 )
+from .callback_proxy import start_callback_proxy
 from .scheduler import scheduler, SETTINGS_PATH
 
 app = FastAPI()
@@ -336,15 +337,13 @@ async def connect_status(provider: str):
     if connected:
         # success path: cancel any still-running authorize subprocess for this
         # provider, then drop the stale session (M3).
-        with _sessions_lock:
-            sess = _authorize_sessions.get(provider)
+        sess = get_authorize_session(provider)
         if sess is not None and not sess.is_finished():
             sess.cancel()
         authorize_remove(provider)
         return {"status": "authorized", "connected": True, "token_section": provider}
 
-    with _sessions_lock:
-        sess = _authorize_sessions.get(provider)
+    sess = get_authorize_session(provider)
     if sess is None:
         return {"status": "waiting", "connected": False}
 
@@ -399,6 +398,7 @@ async def run_now(request: Request):
 @app.on_event("startup")
 async def startup_event():
     ensure_dirs()
+    start_callback_proxy()
     scheduler.start()
 
 

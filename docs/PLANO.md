@@ -79,11 +79,11 @@ GD-SYNC-FOLDER/
 ## 5. Autenticação (Opção A — OAuth "dentro do HTML", genérica por provider)
 
 Fluxo `POST /connect` (com `provider` no body) → página de progresso:
-1. App dispara `rclone authorize <provider> --port 53682` (subprocess, stdout em modo linha).
-2. Extrai a URL `https://accounts.<provider>.com/...` do stdout → **redireciona o browser do usuário**.
-3. Usuário loga → callback cai em `localhost:53682` (porta publicada no compose; OAuth "desktop" aceita loopback em qualquer porta).
-4. O rclone imprime o token blob no stdout → app captura e grava a seção `<provider>` no `/data/rclone.conf` (via `rclone config` não-interativo / stdin).
-5. UI verifica com `rclone lsd <provider>:` → mostra ✅ Conectado ou erro.
+1. App dispara `rclone authorize <backend>` (backend = `drive`/`dropbox`/`onedrive` via `providers.rclone_type`; **não existe flag `--port`** — o rclone escuta sempre em `127.0.0.1:53682` dentro do container, com `--auth-no-open-browser --config /data/rclone.conf`), stdout em modo linha via thread.
+2. Extrai a URL **com `state=`** do stdout (ignora o aviso de "Redirect URL") → **abre em nova aba do browser do usuário**.
+3. Usuário loga → callback cai em `localhost:53682` do host → **proxy TCP interno** (`app/callback_proxy.py`, porta 53683 publicada) encaminha ao loopback do container onde o rclone escuta (docker publishing não alcança listeners de loopback do container).
+4. O rclone imprime o token blob no stdout (seção `[drive]` etc.) → app captura, **normaliza o header para o nome do remote** (`[gdrive]`) e grava em `/data/rclone.conf` atomicamente.
+5. UI verifica via `section_present` (file-based, sem subprocess por poll) → mostra ✅ Conectado ou erro.
 
 Por provider:
 - **gdrive / onedrive**: client_id embutido do rclone funciona out-of-the-box.
@@ -145,7 +145,7 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"    # UI
-      - "127.0.0.1:53682:53682"  # callback OAuth (loopback)
+      - "127.0.0.1:53682:53683"  # callback OAuth (proxy → loopback do container)
     volumes:
       - ./data:/data
       - ${LOCAL_SYNC_DIR:-./local}:/sync
