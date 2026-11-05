@@ -5,6 +5,31 @@ local folders to cloud providers (Google Drive, Dropbox, OneDrive Personal).
 
 ## Usage
 
+The pre-built image is published on GHCR (multiarch: `linux/amd64` + `linux/arm64`):
+
+```bash
+docker pull ghcr.io/katzzero/gdrv-sync:latest
+```
+
+`docker-compose.yml` in this repo builds locally (`build: .`). To run from the
+published image instead:
+
+```yaml
+services:
+  gdrv-sync:
+    image: ghcr.io/katzzero/gdrv-sync:latest   # vs. build: .
+    container_name: gdrv-sync
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:53682:53682"
+    volumes:
+      - ./data:/data
+      - ${LOCAL_SYNC_DIR:-./local}:/sync
+```
+
+Or build locally:
+
 ```bash
 docker compose up -d
 ```
