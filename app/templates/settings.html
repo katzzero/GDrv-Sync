@@ -40,7 +40,7 @@ async function load(){
   state = (s.providers || {});
   const provState = (h.providers || {});
   PROVIDERS.forEach(p=>{
-    if(!state[p]) state[p] = {enabled:false, direction:'bisync', interval_min:5, remote:'', local_sub:SUBS[p], mirror:false};
+    if(!state[p]) state[p] = {enabled:false, direction:'upload', interval_min:5, remote:'', local_sub:SUBS[p], mirror:false};
     state[p].connected = provState[p]?.connected ?? false;
     state[p].enabled = provState[p]?.enabled ?? !!state[p].enabled;
     // default mirror false (never delete anything by default)
@@ -72,8 +72,8 @@ function renderPane(){
       label='⬇︎ Download — nuvem → local (nunca apaga no local)';
       note='Copia para o local. Nunca apaga nada no local (não destrutivo por padrão).';
     } else {
-      label='⇄ Bidirecional — mudanças dos dois lados; conflito = aborta';
-      note='Bisync com --conflict-resolve none: conflito aborta a execução, nenhum lado vence.';
+      label='⇄ Bidirecional — DESTRUTIVO: propaga deleções';
+      note='Atenção: bisync propaga exclusões nos dois lados (apagar num lado apaga no outro). Conflito de conteúdo = aborta (--conflict-resolve none). Para só copiar sem apagar nada, use Upload/Download.';
     }
     const sel = s.direction===d?'sel':'';
     const disabled = (d==='bisync' && mirror) ? ' disabled' : '';
@@ -89,7 +89,7 @@ function renderPane(){
   // Mirror warning box text (where deleted/extras go).
   let mirrorWhere = '';
   if(directionOneWay(s.direction)==='upload'){
-    mirrorWhere = `<code>${escapeHtml(p)}:/.gdrv-deleted/<UTC-ts></code> (pasta na nuvem, lado destino).`;
+    mirrorWhere = `<code>${escapeHtml(p)}:.gdrv-deleted/<UTC-ts></code> (pasta na RAIZ da nuvem, irmã do destino — nunca dentro dele).`;
   } else if(directionOneWay(s.direction)==='download'){
     mirrorWhere = `<code>./data/deleted/${escapeHtml(p)}/<UTC-ts></code> (lado local, visível no volume ./data).`;
   }
@@ -252,9 +252,13 @@ function setDir(d){
 }
 
 function cmdFor(dir, local, remote, mirror){
-  if(dir==='upload') return `rclone copy ${local} ${remote}` + (mirror?' --backup-dir <cloud>/.gdrv-deleted/<ts>':'');
-  if(dir==='download') return `rclone copy ${remote} ${local}` + (mirror?' --backup-dir ./data/deleted/<prov>/<ts>':'');
-  return `rclone bisync ${local} ${remote} --conflict-resolve none`+ (dir==='bisync'?' --resync (1ª exec)':'');
+  if(dir==='upload') return mirror
+    ? `rclone sync ${local} ${remote} --backup-dir <prov>:.gdrv-deleted/<ts>`
+    : `rclone copy ${local} ${remote}`;
+  if(dir==='download') return mirror
+    ? `rclone sync ${remote} ${local} --backup-dir ./data/deleted/<prov>/<ts>`
+    : `rclone copy ${remote} ${local}`;
+  return `rclone bisync ${local} ${remote} --conflict-resolve none (1ª exec/ após queda: --resync)`;
 }
 
 async function previewCmd(p){
@@ -309,6 +313,7 @@ function openBrowse(p){
 }
 // Listen for selection from the browse popup. Keep remote exactly as sent ("gdrive:" for root).
 window.addEventListener('message', ev=>{
+  if(ev.origin !== window.location.origin) return;   // only trust our own browse popup
   if(!ev.data || ev.data.gdSync !== 'browse-selected') return;
   const p = ev.data.provider, remote = ev.data.remote;
   document.getElementById('remote-'+p).value = remote;

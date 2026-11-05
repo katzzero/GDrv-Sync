@@ -78,7 +78,12 @@ async function startConnect(p, btn){
           if(!w){
             const hint = document.getElementById('manual-'+p);
             if(hint){
-              hint.innerHTML = 'Abra este link para autorizar: <a href="'+j.auth_url+'" target="_blank" style="color:var(--accent);word-break:break-all">link de autorização</a>';
+              const a = document.createElement('a');
+              a.href = j.auth_url; a.target = '_blank';
+              a.style.cssText = 'color:var(--accent);word-break:break-all';
+              a.textContent = 'link de autorização';
+              hint.textContent = 'Abra este link para autorizar: ';
+              hint.appendChild(a); hint.style.display = 'block';
               hint.style.display = 'block';
             }
           }

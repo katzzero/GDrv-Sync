@@ -171,10 +171,17 @@ def _base_args() -> List[str]:
 
 
 def _redact(lines: List[str]) -> List[str]:
-    """Drop token-bearing lines and everything from a [provider] header onward."""
+    """Drop token-bearing lines and everything from a [provider] header onward.
+
+    Covers both INI-style ``token =`` lines and the raw JSON blob printed by
+    ``rclone authorize`` between the Paste/End-paste banners (access_token /
+    refresh_token keys).
+    """
     out: List[str] = []
     for line in lines:
         if re.match(r"^\s*token\s*=", line, re.I):
+            continue
+        if re.search(r"access_token|refresh_token|\"expiry\"", line, re.I):
             continue
         if re.match(r"^\[", line.strip()):
             break
@@ -281,9 +288,16 @@ def sync(local_path: str, remote: str, provider: str, log_file: str,
     When ``mirror`` is True, adds ``--backup-dir`` so destination-only files
     are *moved* into backup-dir instead of hard-deleted. ``backup_dir`` must be
     on the destination side (cloud for upload, local for download).
+
+    SAFETY GUARD: mirror without backup_dir would be a HARD DELETE on the
+    destination — refused here even if a caller (or hand-edited settings.json)
+    requests it. This is the last line of defense against destructive syncs.
     """
+    if mirror and not backup_dir:
+        raise ValueError("refusing destructive sync without backup-dir (mirror mode requires --backup-dir)")
     cmd = [
         "sync", local_path, remote,
+        "-v",  # per-file operation lines in the log (audit + counts)
         "--config", str(RCLONE_CONF),
         "--log-file", log_file,
         "--timeout", "55m",
@@ -303,6 +317,7 @@ def copy(source: str, dest: str, provider: str, log_file: str) -> int:
     """
     cmd = [
         "copy", source, dest,
+        "-v",  # per-file operation lines in the log (audit + counts)
         "--config", str(RCLONE_CONF),
         "--log-file", log_file,
         "--timeout", "55m",
@@ -328,6 +343,7 @@ def bisync(local_path: str, remote: str, provider: str, log_file: str,
     try:
         cmd = [
             "bisync", local_path, remote,
+            "-v",  # per-file operation lines in the log (audit + counts)
             "--config", str(RCLONE_CONF),
             "--log-file", log_file,
             "--timeout", "55m",
@@ -347,6 +363,26 @@ def bisync(local_path: str, remote: str, provider: str, log_file: str,
 # ---------------------------------------------------------------------------
 # Dry-run preview (read-only: never mutates anything)
 # ---------------------------------------------------------------------------
+
+def count_transfers(log_file: str, direction: str) -> Tuple[int, int]:
+    """Parse a real (non-dry-run) rclone log for transferred files.
+
+    Returns (up, down): upload direction -> all copies are 'up'; download ->
+    all 'down'; bisync -> (None, None) because per-file direction markers in
+    bisync logs are not reliably parseable — the UI shows '—' instead of a
+    fake 0/0.
+    """
+    try:
+        content = Path(log_file).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return (0, 0) if direction != "bisync" else (None, None)
+    n = sum(1 for line in content.splitlines() if "Copied (" in line)
+    if direction == "upload":
+        return n, 0
+    if direction == "download":
+        return 0, n
+    return None, None
+
 
 def preview(direction: str, local_path: str, remote: str, provider: str,
             mirror: bool = False, backup_dir: Optional[str] = None,
@@ -799,13 +835,3 @@ def _remove_section(text: str, provider: str) -> str:
 
 
 # Backwards-compatible name used by older code.
-def authorize(provider: str, port: int = 53682) -> Tuple[int, str, str]:
-    """Blocking authorize (kept for compatibility). Prefer authorize_start."""
-    sess = authorize_start(provider, port)
-    got_url = sess.wait_for_url(timeout=60)
-    output = sess.full_output()
-    if sess.get_status() == "done":
-        return 0, output, ""
-    if got_url and sess.auth_url:
-        return 0, output, ""
-    return -1, output, "authorize did not complete"

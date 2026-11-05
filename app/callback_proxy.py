@@ -19,7 +19,9 @@ from typing import Optional
 log = logging.getLogger("gdrv-sync")
 
 PROXY_PORT = int(os.environ.get("OAUTH_PROXY_PORT", "53683"))
-TARGET_PORT = int(os.environ.get("OAUTH_CALLBACK_PORT", "53682"))
+# rclone authorize ALWAYS listens on 127.0.0.1:53682 (there is no --port flag
+# for it) — do not make this follow OAUTH_CALLBACK_PORT or OAuth breaks.
+TARGET_PORT = 53682
 
 _server: Optional[socket.socket] = None
 _started = False

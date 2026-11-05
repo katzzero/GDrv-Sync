@@ -39,15 +39,15 @@ class RunRecord:
     """Record of a single sync run."""
 
     def __init__(self, provider: str, direction: str, mode: str, returncode: int,
-                 start: float, end: float):
+                 start: float, end: float, files_up=None, files_down=None):
         self.provider = provider
         self.direction = direction
         self.mode = mode  # "copy" | "sync+backup" | "bisync"
         self.returncode = returncode
         self.start_ts = datetime.fromtimestamp(start).strftime("%H:%M:%S")
         self.duration = round(end - start, 1)
-        self.files_up = 0
-        self.files_down = 0
+        self.files_up = files_up
+        self.files_down = files_down
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -117,7 +117,7 @@ class SyncScheduler:
     def _defaults() -> Dict[str, Any]:
         return {
             "providers": {
-                "gdrive":  {"enabled": False, "direction": "bisync",  "interval_min": 5, "remote": "gdrive:",  "local_sub": "Gdrive"},
+                "gdrive":  {"enabled": False, "direction": "upload",  "interval_min": 5, "remote": "gdrive:",  "local_sub": "Gdrive"},
                 "dropbox": {"enabled": False, "direction": "upload",  "interval_min": 5, "remote": "dropbox:", "local_sub": "Dropbox"},
                 "onedrive":{"enabled": False, "direction": "download","interval_min": 10,"remote": "onedrive:", "local_sub": "Onedrive"},
             },
@@ -204,7 +204,7 @@ class SyncScheduler:
         """
         with self.lock:
             ps = self.settings.get("providers", {}).get(provider, {})
-            direction = ps.get("direction", "bisync")
+            direction = ps.get("direction", "upload")
             remote = ps.get("remote") or f"{provider}:"
             local_sub = ps.get("local_sub", provider.capitalize())
             local_path = str(Path(SYNC_DIR) / local_sub)
@@ -272,10 +272,15 @@ class SyncScheduler:
                         self.state[provider].running = False
 
         end = time.time()
+        # Honest transfer counts from the run's own rclone log (M-review: no
+        # more hardcoded 0↑·0↓). bisync -> (None, None) -> UI shows "—".
+        from .rclone_ops import count_transfers
+        files_up, files_down = count_transfers(log_file, direction)
         # Guarantee running=False on every path (incl. early mkdir failures).
         with self.lock:
             self.state[provider].running = False
-            record = RunRecord(provider, direction, mode, returncode, start, end)
+            record = RunRecord(provider, direction, mode, returncode, start, end,
+                               files_up, files_down)
             self.state[provider].last_runs.appendleft(record)
 
             if returncode == 0:

@@ -130,19 +130,14 @@ def get_rclone_version() -> Optional[str]:
 
 
 def sanitize_rclone_output(text: str, max_lines: int = 10) -> str:
-    """Redact token-bearing content from rclone output before surfacing to browser (M12).
-
-    Drops any line matching 'token = ' and everything from a '[provider]' header
-    onward; returns at most max_lines lines.
+    """Redact token-bearing content from rclone output before surfacing to
+    browser (M12). Delegates to rclone_ops._redact — ONE central redaction
+    implementation, covering 'token =' lines, raw JSON blobs
+    (access_token/refresh_token/expiry) and everything from a '[provider]'
+    header onward; returns at most max_lines lines.
     """
-    lines = []
-    for line in text.splitlines():
-        if re.match(r"^\s*token\s*=", line, re.I):
-            continue
-        if re.match(r"^\[", line.strip()):
-            break
-        lines.append(line)
-    return "\n".join(lines[:max_lines])
+    from .rclone_ops import _redact
+    return "\n".join(_redact(text.splitlines())[:max_lines])
 
 
 # --------------------------------------------------------------------------- HTML pages
@@ -339,7 +334,7 @@ async def api_preview(request: Request):
     # Fall back to the SAVED settings for any field the caller omits — never
     # silently preview "upload from provider root" (footgun: targets whole drive).
     saved = scheduler.get_settings().get("providers", {}).get(provider, {})
-    direction = parse_direction(data.get("direction") or saved.get("direction", "bisync"))
+    direction = parse_direction(data.get("direction") or saved.get("direction", "upload"))
     remote_input = data.get("remote")
     if remote_input is None or remote_input == "":
         remote_input = saved.get("remote", "")
@@ -415,12 +410,8 @@ async def connect_start(request: Request):
     data = await request.json()
     provider = validate_provider(data.get("provider"))
 
-    try:
-        port = int(os.environ.get("OAUTH_CALLBACK_PORT", "53682"))
-    except (TypeError, ValueError):
-        port = 53682
-        log.warning("invalid OAUTH_CALLBACK_PORT env; falling back to 53682")  # H5
-
+    # rclone authorize listens ONLY on 53682 (no --port flag); keep constant.
+    port = 53682
     sess = authorize_start(provider, port)
     # Run the blocking wait in a threadpool so the event loop isn't blocked up to 60s (M11).
     got_url = await asyncio.to_thread(sess.wait_for_url, 60)
