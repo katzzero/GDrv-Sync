@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="view active" id="view-settings">
+    <div class="card">
+        <h2>Configurações por provedor</h2>
+        <div class="sub">Cada aba tem sua tarefa própria: pasta local fixa em <code>/sync/&lt;Provedor&gt;</code> (criada automaticamente) ↔ pasta escolhida na nuvem.</div>
+
+        <!-- Providers badges (connected state) rendered by JS from /healthz -->
+        <div class="tabs" id="tabs"></div>
+        <div id="tabpane"></div>
+    </div>
+</section>
+
+<script>
+const PROVIDERS = ['gdrive', 'dropbox', 'onedrive'];
+const LABELS = {gdrive:'Google Drive', dropbox:'Dropbox', onedrive:'OneDrive'};
+const SUBS = {gdrive:'Gdrive', dropbox:'Dropbox', onedrive:'Onedrive'};
+let state = {}; // provider -> {connected, enabled, direction, interval, remote, local_sub}
+let active = 'gdrive';
+
+// Escape user-controlled values for safe insertion into HTML (M8: stored XSS).
+function escapeHtml(t){
+  return String(t==null?'':t)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function escapeAttr(t){ return escapeHtml(t); }
+
+function renderTabs(){
+  document.getElementById('tabs').innerHTML = PROVIDERS.map(p =>
+    `<button class="${p===active?'on':''}" onclick="setTab('${p}')">${LABELS[p]}</button>`).join('');
+}
+function setTab(p){active=p; renderTabs(); renderPane();}
+
+async function load(){
+  const [s, h] = await Promise.all([
+    fetch('/api/settings').then(r=>r.json()),
+    fetch('/healthz').then(r=>r.json()),
+  ]);
+  state = (s.providers || {});
+  const provState = (h.providers || {});
+  PROVIDERS.forEach(p=>{
+    if(!state[p]) state[p] = {enabled:false, direction:'bisync', interval_min:5, remote:'', local_sub:SUBS[p]};
+    state[p].connected = provState[p]?.connected ?? false;
+    state[p].enabled = provState[p]?.enabled ?? !!state[p].enabled;
+  });
+  renderTabs(); renderPane();
+}
+
+function renderPane(){
+  const p = active, s = state[p] || {};
+  const connected = s.connected;
+  const local = `/sync/${SUBS[p]}`;
+  const canEnable = connected;
+
+  const connHtml = connected
+    ? `<div class="connstat ok">✓ <code>${escapeHtml(p)}</code> autenticado <div class="spacer"></div><button class="btn small ghost" onclick="go('connect')">Conectar</button></div>`
+    : `<div class="connstat off">✗ <code>${escapeHtml(p)}</code> não autenticado <div class="spacer"></div><button class="btn small ghost" onclick="go('connect')">Conectar</button></div>`;
+
+  const dirs = ['upload','download','bisync'].map(d=>{
+    const label = d==='upload'?'⬆︎ Upload': d==='download'?'⬇︎ Download':'⇄ Bidirecional';
+    const note = d==='upload'?'espelha local → nuvem. Extras na nuvem são <u>apagados</u>.'
+      : d==='download'?'espelha nuvem → local. Extras locais são <u>apagados</u>.'
+      :'bisync: mudanças dos dois lados. 1ª execução usa --resync.';
+    return `<div class="dir ${s.direction===d?'sel':''}" onclick="setDir('${d}')"><b>${label}</b><small>${note}</small></div>`;
+  }).join('');
+
+  // Keep the remote exactly as sent by browse ("gdrive:" for root) — do NOT strip the colon (H1).
+  const remoteVal = s.remote || '';
+  const remotePlaceholder = `${p}:`;
+  const remoteEscaped = escapeAttr(remoteVal);
+  const placeholderEscaped = escapeAttr(remotePlaceholder);
+
+  document.getElementById('tabpane').innerHTML = `
+    ${connHtml}
+    <div class="row" style="margin-top:14px">
+      <div style="flex:1">
+        <label class="f">Pasta local (fixa por provedor)</label>
+        <input type="text" value="${escapeAttr(local)}" readonly style="background:#131a29;color:var(--muted)">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Criada automaticamente dentro do volume LOCAL_SYNC_DIR (docker-compose).</div>
+      </div>
+      <div style="flex:1">
+        <label class="f">Pasta na nuvem</label>
+        <div class="row">
+          <input type="text" id="remote-${p}" value="${remoteEscaped}" placeholder="${placeholderEscaped}">
+          <button class="btn ghost" onclick="openBrowse('${p}')" ${!connected?'disabled':''}>📁 Navegar</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Vazio (<code>${escapeHtml(p)}:</code>) = raiz do provedor.</div>
+      </div>
+    </div>
+    <label class="f" style="margin-top:16px">Direção</label>
+    <div class="dirs">${dirs}</div>
+    <div class="warnbox ${s.direction!=='bisync'?'show':''}">⚠️ Modo one-way deleta arquivos no destino que não existem na origem.</div>
+    <div class="row" style="margin-top:18px">
+      <div style="flex:1">
+        <label class="f">Intervalo (min) — mínimo recomendado 5</label>
+        <input type="number" id="interval-${p}" value="${escapeAttr(s.interval_min||5)}" min="5">
+      </div>
+      <div style="margin-left:auto;text-align:center">
+        <label class="f">Sync habilitado</label>
+        <label class="toggle"><input type="checkbox" id="enabled-${p}" ${s.enabled?'checked':''} ${!canEnable?'disabled':''}><span></span></label>
+        ${!canEnable?'<div style="color:var(--warn);font-size:11px;margin-top:4px">Conecte a nuvem primeiro para habilitar.</div>':''}
+      </div>
+      <button class="btn" onclick="saveSettings('${p}')" style="margin-left:20px">Salvar</button>
+    </div>
+    <div class="warnbox show" id="warn-${p}" style="${canEnable||!s.enabled?'display:none':'display:block'}">
+      🔑 <code>${escapeHtml(p)}</code> não está autenticado — habilite apenas após conectar (aba "Conectar Nuvem").
+    </div>
+    <div class="card cmdprev" style="margin-top:18px"><b style="color:var(--text)">Comando efetivo (preview)</b><br>
+      <code>${escapeHtml(cmdFor(s.direction, local, remoteVal||remotePlaceholder))}</code></div>
+  `;
+}
+
+function setDir(d){state[active].direction=d; renderPane();}
+
+async function saveSettings(p){
+  const btn = event && event.target ? event.target : null;
+  const orig = btn ? btn.textContent : '';
+  if(btn) btn.textContent='Salvando…';
+  const enabled = document.getElementById('enabled-'+p).checked;
+  if(enabled && !state[p].connected){
+    alert('Conecte '+LABELS[p]+' primeiro antes de habilitar o sync.');
+    if(btn) btn.textContent=orig;
+    return;
+  }
+  const cfg = {
+    provider: p,
+    enabled: enabled,
+    direction: state[p].direction,
+    interval_min: parseInt(document.getElementById('interval-'+p).value)||5,
+    remote: document.getElementById('remote-'+p).value||'',
+  };
+  try{
+    const r = await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+    const j = await r.json();
+    if(btn) btn.textContent = j.ok ? '✓ Salvo' : 'Erro';
+    if(j.ok){
+      state[p].enabled = cfg.enabled;
+      state[p].direction = cfg.direction;
+      state[p].interval_min = cfg.interval_min;
+      state[p].remote = cfg.remote;
+      renderPane();
+      setTimeout(()=>{if(btn) btn.textContent=orig;}, 900);
+    } else {
+      alert(j.error||'Falha ao salvar');
+      if(btn) btn.textContent=orig;
+    }
+  }catch(e){
+    if(btn) btn.textContent=orig;
+    alert('Erro de rede ao salvar');
+  }
+}
+
+function cmdFor(dir, local, remote){
+  if(dir==='upload') return `rclone sync ${local} ${remote}`;
+  if(dir==='download') return `rclone sync ${remote} ${local}`;
+  return `rclone bisync ${local} ${remote}`+ (dir==='bisync'?' --resync':'');
+}
+
+/* ---------- connect navigation with browse picker ---------- */
+let browseWin = null;
+function openBrowse(p){
+  const url = `/browse?provider=${encodeURIComponent(p)}`;
+  browseWin = window.open(url, 'gd-sync-browse', 'width=700,height=520');
+}
+// Listen for selection from the browse popup. Keep remote exactly as sent ("gdrive:" for root).
+window.addEventListener('message', ev=>{
+  if(!ev.data || ev.data.gdSync !== 'browse-selected') return;
+  const p = ev.data.provider, remote = ev.data.remote;
+  document.getElementById('remote-'+p).value = remote;
+  state[p].remote = remote;
+  renderPane();
+});
+
+/* ---------- init ---------- */
+renderTabs(); load();
+</script>
+{% endblock %}

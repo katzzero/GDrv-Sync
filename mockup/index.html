@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gd-sync — mockup WebUI</title>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#171e2e; --panel2:#1d2537; --line:#2a3550;
+    --text:#dbe3f4; --muted:#8b98b8; --accent:#4f8cff; --accent2:#3b6fe0;
+    --ok:#3ecf8e; --warn:#f5c451; --err:#ff6b6b; --radius:12px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{font:14px/1.5 "Segoe UI",system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh}
+  header{display:flex; align-items:center; gap:10px; padding:14px 22px; background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:5; flex-wrap:wrap}
+  header .logo{font-weight:700; font-size:16px; letter-spacing:.3px; margin-right:6px}
+  header .logo span{color:var(--accent)}
+  .badge{font-size:11px; padding:3px 10px; border-radius:20px; border:1px solid var(--line); color:var(--muted)}
+  .badge.ok{color:var(--ok); border-color:var(--ok)}
+  .badge.off{color:var(--err); border-color:var(--err)}
+  header .spacer{flex:1}
+  .pill-mock{font-size:10px; background:#2a3550; color:var(--muted); padding:3px 8px; border-radius:6px}
+  main{display:flex; max-width:1150px; margin:0 auto; padding:22px; gap:22px}
+  nav{width:170px; flex-shrink:0}
+  nav button{display:block; width:100%; text-align:left; background:none; border:none; color:var(--muted); font:inherit; padding:10px 14px; border-radius:8px; cursor:pointer; margin-bottom:4px}
+  nav button:hover{background:var(--panel2); color:var(--text)}
+  nav button.active{background:var(--accent); color:#fff}
+  nav .navsub{font-size:11px; color:var(--muted); padding:10px 14px 4px; text-transform:uppercase; letter-spacing:.5px}
+  section.view{flex:1; display:none; min-width:0}
+  section.view.active{display:block}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:20px; margin-bottom:18px}
+  .card h2{font-size:15px; margin-bottom:4px}
+  .card .sub{color:var(--muted); font-size:12px; margin-bottom:16px}
+  label.f{display:block; font-size:12px; color:var(--muted); margin:14px 0 5px}
+  .row{display:flex; gap:10px; align-items:center}
+  input[type=text],input[type=password],input[type=number],select{width:100%; background:var(--panel2); border:1px solid var(--line); color:var(--text); padding:9px 12px; border-radius:8px; font:inherit}
+  input:focus,select:focus{outline:none; border-color:var(--accent)}
+  .btn{background:var(--accent); color:#fff; border:none; border-radius:8px; padding:9px 16px; font:inherit; cursor:pointer; white-space:nowrap}
+  .btn:hover{background:var(--accent2)}
+  .btn.ghost{background:none; border:1px solid var(--line); color:var(--text)}
+  .btn.ghost:hover{border-color:var(--accent)}
+  .btn.small{padding:5px 10px; font-size:12px}
+  /* tabs por provedor */
+  .tabs{display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:16px}
+  .tabs button{background:none; border:none; color:var(--muted); font:inherit; padding:9px 16px; cursor:pointer; border-radius:8px 8px 0 0; border-bottom:2px solid transparent}
+  .tabs button.on{color:var(--text); border-bottom-color:var(--accent); background:var(--panel2)}
+  .connstat{font-size:12px; padding:8px 12px; border-radius:8px; margin-bottom:6px; display:flex; align-items:center; gap:10px}
+  .connstat.ok{background:rgba(62,207,142,.1); color:var(--ok)}
+  .connstat.off{background:rgba(255,107,107,.08); color:var(--err)}
+  .connstat .spacer{flex:1}
+  .pcard{border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:12px; background:#131a29}
+  .dirs{display:grid; grid-template-columns:repeat(3,1fr); gap:10px}
+  .dir{border:1px solid var(--line); border-radius:10px; padding:12px; cursor:pointer; background:var(--panel2)}
+  .dir.sel{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent)}
+  .dir b{display:block; font-size:13px; margin-bottom:2px}
+  .dir small{color:var(--muted); font-size:11px}
+  .warnbox{margin-top:12px; font-size:12px; color:var(--warn); background:rgba(245,196,81,.08); border:1px solid rgba(245,196,81,.3); border-radius:8px; padding:8px 12px; display:none}
+  .warnbox.show{display:block}
+  .adv{border:1px dashed var(--line); border-radius:8px; padding:12px; display:none; max-width:560px; margin-top:12px}
+  .adv.show{display:block}
+  .adv summary{cursor:pointer; color:var(--muted); font-size:12px; margin-bottom:6px}
+  .toggle{position:relative; width:42px; height:23px; flex-shrink:0}
+  .toggle input{display:none}
+  .toggle span{position:absolute; inset:0; background:var(--line); border-radius:20px; cursor:pointer; transition:.2s}
+  .toggle span::after{content:""; position:absolute; top:2.5px; left:3px; width:18px; height:18px; background:#fff; border-radius:50%; transition:.2s}
+  .toggle input:checked+span{background:var(--ok)}
+  .toggle input:checked+span::after{left:21px}
+  table{width:100%; border-collapse:collapse; font-size:13px}
+  th{color:var(--muted); text-align:left; font-weight:500; font-size:11px; text-transform:uppercase; letter-spacing:.5px; padding:8px 10px; border-bottom:1px solid var(--line)}
+  td{padding:9px 10px; border-bottom:1px solid var(--line)}
+  .st{font-size:12px; padding:2px 9px; border-radius:12px}
+  .st.ok{color:var(--ok); background:rgba(62,207,142,.12)}
+  .st.run{color:var(--accent); background:rgba(79,140,255,.12)}
+  .st.err{color:var(--err); background:rgba(255,107,107,.12)}
+  .st.wait{color:var(--muted); background:rgba(139,152,184,.12)}
+  pre.log{background:#0b0f18; border:1px solid var(--line); border-radius:8px; padding:12px; font-size:12px; line-height:1.7; overflow-x:auto; color:#9fb0d0; max-height:220px}
+  pre.log .t{color:#54627e}
+  .connect-steps{list-style:none}
+  .connect-steps li{display:flex; gap:10px; padding:8px 0; color:var(--muted); border-bottom:1px dashed var(--line)}
+  .connect-steps li:last-child{border-bottom:none}
+  .connect-steps li .ic{width:22px; height:22px; border-radius:50%; background:var(--panel2); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:12px; flex-shrink:0}
+  .connect-steps li.done{color:var(--text)}
+  .connect-steps li.done .ic{background:rgba(62,207,142,.15); border-color:var(--ok); color:var(--ok)}
+  .connect-steps li.spin .ic{border-color:var(--accent); color:var(--accent); animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.4}}
+  /* modal browse */
+  .overlay{position:fixed; inset:0; background:rgba(5,8,15,.7); display:none; align-items:center; justify-content:center; z-index:20}
+  .overlay.show{display:flex}
+  .modal{width:min(560px,92vw); background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden}
+  .modal .mhead{display:flex; align-items:center; gap:10px; padding:14px 18px; border-bottom:1px solid var(--line)}
+  .modal .mhead b{flex:1; font-size:14px}
+  .modal .mhead .x{background:none; border:none; color:var(--muted); font-size:18px; cursor:pointer}
+  .crumbs{padding:10px 18px; font-size:12px; color:var(--muted); border-bottom:1px solid var(--line); background:var(--panel2)}
+  .crumbs a{color:var(--accent); text-decoration:none; cursor:pointer}
+  .folderlist{max-height:300px; overflow-y:auto; padding:8px}
+  .folderlist .fitem{display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:8px; cursor:pointer}
+  .folderlist .fitem:hover{background:var(--panel2)}
+  .folderlist .fitem .ico{font-size:16px}
+  .folderlist .fitem .nm{flex:1}
+  .folderlist .fitem .gt{color:var(--muted); font-size:12px}
+  .folderlist .root-item{color:var(--accent)}
+  .modal .mfoot{display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; border-top:1px solid var(--line)}
+  .sel-label{font-size:12px; color:var(--muted); margin-right:auto; align-self:center}
+  .footnote{text-align:center; color:var(--muted); font-size:11px; padding:18px}
+  .cmdprev{font-size:12px;color:var(--muted)}
+  .cmdprev code{color:var(--accent)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">gd<span>·</span>sync</div>
+  <span id="provBadges" style="display:flex;gap:8px"></span>
+  <span class="badge ok" id="healthBadge" title="GET /healthz">container: healthy</span>
+  <div class="spacer"></div>
+  <span class="pill-mock">MOCKUP — dados falsos, sem backend</span>
+</header>
+
+<main>
+  <nav>
+    <button class="active" data-view="settings" onclick="go('settings')">⚙︎ Configurações</button>
+    <button data-view="connect" onclick="go('connect')">🔑 Conectar Nuvem</button>
+    <button data-view="status" onclick="go('status')">📊 Status & Logs</button>
+    <div class="navsub">Volumes</div>
+    <div style="font-size:11px;color:var(--muted);padding:4px 14px">./data → /data<br>~/SyncDrive → /sync<br><span style="color:#54627e">/sync/Gdrive · /sync/Dropbox · /sync/Onedrive</span></div>
+  </nav>
+
+  <!-- ============ SETTINGS (abas por provedor) ============ -->
+  <section class="view active" id="view-settings">
+    <div class="card">
+      <h2>Configurações por provedor</h2>
+      <div class="sub">Cada aba tem sua tarefa própria: pasta local fixa em <code>/sync/&lt;Provedor&gt;</code> (criada automaticamente) ↔ pasta escolhida na nuvem.</div>
+      <div class="tabs" id="tabs"></div>
+      <div id="tabpane"></div>
+    </div>
+  </section>
+
+  <!-- ============ CONNECT (3 blocos empilhados) ============ -->
+  <section class="view" id="view-connect">
+    <div class="card">
+      <h2>Conectar Nuvem</h2>
+      <div class="sub">OAuth no seu navegador — nenhum copiar/colar (Opção A). Cada provedor conecta de forma independente; autorize quantos quiser.</div>
+      <div id="connectCards"></div>
+    </div>
+  </section>
+
+  <!-- ============ STATUS ============ -->
+  <section class="view" id="view-status">
+    <div class="card">
+      <div class="row">
+        <div><h2>Últimas execuções</h2><div class="sub">agendador: 1 comando por vez · /healthz ok</div></div>
+        <div class="spacer" style="flex:1"></div>
+        <select id="runProv" style="max-width:160px">
+          <option value="gdrive">Google Drive</option>
+          <option value="dropbox">Dropbox</option>
+          <option value="onedrive">OneDrive</option>
+        </select>
+        <button class="btn small ghost" onclick="runNow(this)">▶ Run now</button>
+      </div>
+      <table id="hist">
+        <thead><tr><th>Início</th><th>Provedor</th><th>Direção</th><th>Status</th><th>Arquivos</th><th>Duração</th></tr></thead>
+        <tbody>
+          <tr><td>14:22:03</td><td>gdrive</td><td>bisync</td><td><span class="st ok">ok</span></td><td>12 ↑ · 3 ↓</td><td>41s</td></tr>
+          <tr><td>14:21:01</td><td>dropbox</td><td>upload</td><td><span class="st ok">ok</span></td><td>1 ↑ · 0 ↓</td><td>6.2s</td></tr>
+          <tr><td>14:19:58</td><td>onedrive</td><td>download</td><td><span class="st err">exit 2 · rede</span></td><td>0 ↑ · 4 ↓</td><td>1m03s</td></tr>
+          <tr><td>14:17:01</td><td>gdrive</td><td>bisync</td><td><span class="st ok">ok</span></td><td>0 ↑ · 0 ↓</td><td>2.1s</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h2>Log (rclone)</h2>
+      <div class="sub">tail de /data/logs/sync-gdrive-20261104-1422.log</div>
+      <pre class="log"><span class="t">14:22:03.112</span> NOTICE: bisync is EXPERIMENTAL
+<span class="t">14:22:04.987</span> INFO  : - last: syncing
+<span class="t">14:22:05.003</span> INFO  : /sync/Gdrive: comparing with gdrive:GD-SYNC
+<span class="t">14:22:07.441</span> INFO  : note-vendas.md: copied (upload)
+<span class="t">14:22:09.020</span> INFO  : apredio.pdf: copied (download)
+<span class="t">14:22:38.771</span> INFO  : Everything's OK</pre>
+    </div>
+  </section>
+</main>
+
+<!-- ============ BROWSE MODAL ============ -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="mhead"><b id="mbTitle">Selecionar pasta</b><button class="x" onclick="closeBrowse()">✕</button></div>
+    <div class="crumbs" id="crumbs"></div>
+    <div class="folderlist" id="folderlist"></div>
+    <div class="mfoot">
+      <span class="sel-label" id="selLabel"></span>
+      <button class="btn" onclick="selectHere()" id="btnSel" disabled>Selecionar esta pasta</button>
+    </div>
+  </div>
+</div>
+
+<div class="footnote">mockup estático — interações são simulação; backend planejado: FastAPI + rclone subprocess (docs/PLANO.md)</div>
+
+<script>
+/* ---------- providers & estado ---------- */
+const PROV={
+  gdrive:{label:'Google Drive', sub:'Gdrive',   root:'raiz do Meu Drive', icon:'🟢'},
+  dropbox:{label:'Dropbox',     sub:'Dropbox',  root:'raiz do Dropbox (app rclone)', icon:'🔵'},
+  onedrive:{label:'OneDrive',   sub:'Onedrive', root:'raiz do OneDrive', icon:'☁️'}
+};
+const state={}; for(const k in PROV) state[k]={connected:false, remote:'', dir:'bisync', interval:5, enabled:false, warned:false};
+let active='gdrive';
+
+/* ---------- navegação principal ---------- */
+function go(v){
+  document.querySelectorAll('nav button[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===v));
+  document.querySelectorAll('section.view').forEach(s=>s.classList.toggle('active',s.id==='view-'+v));
+}
+
+/* ---------- badges do header ---------- */
+function renderBadges(){
+  document.getElementById('provBadges').innerHTML = Object.entries(PROV).map(([k,p])=>
+    `<span class="badge ${state[k].connected?'ok':'off'}" title="${p.label}">${p.icon} ${k} ${state[k].connected?'✓':'✗'}</span>`).join('');
+}
+
+/* ---------- abas ---------- */
+function renderTabs(){
+  document.getElementById('tabs').innerHTML = Object.entries(PROV).map(([k,p])=>
+    `<button class="${k===active?'on':''}" onclick="setTab('${k}')">${p.icon} ${p.label}</button>`).join('');
+}
+function setTab(k){active=k; renderTabs(); renderPane();}
+
+function cmdFor(s,local,remote){
+  if(s==='upload') return `rclone sync ${local} ${remote} …`;
+  if(s==='download') return `rclone sync ${remote} ${local} …`;
+  return `rclone bisync ${local} ${remote} --resync …`;
+}
+function renderPane(){
+  const k=active, p=PROV[k], s=state[k];
+  const local=`/sync/${p.sub}`;
+  const conn = s.connected
+    ? `<div class="connstat ok">✓ <code>${k}</code> autenticado <div class="spacer"></div></div>`
+    : `<div class="connstat off">✗ <code>${k}</code> não autenticado <div class="spacer"></div><button class="btn small ghost" onclick="go('connect')">Conectar</button></div>`;
+  const dirs = ['upload','download','bisync'].map(d=>
+    `<div class="dir ${s.dir===d?'sel':''}" onclick="setDir('${d}')">${
+      d==='upload'?'<b>⬆︎ Upload</b><small>espelha local → nuvem. Extras na nuvem são <u>apagados</u>.</small>'
+      :d==='download'?'<b>⬇︎ Download</b><small>espelha nuvem → local. Extras locais são <u>apagados</u>.</small>'
+      :'<b>⇄ Bidirecional</b><small>bisync: mudanças dos dois lados. 1ª execução usa --resync.</small>'
+    }</div>`).join('');
+  document.getElementById('tabpane').innerHTML = `
+    ${conn}
+    <div class="row" style="margin-top:14px">
+      <div style="flex:1">
+        <label class="f">Pasta local (fixa por provedor)</label>
+        <input type="text" value="${local}" readonly style="background:#131a29; color:var(--muted)">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">📦 Criada automaticamente dentro do volume <code>LOCAL_SYNC_DIR</code> (docker-compose).</div>
+      </div>
+      <div style="flex:1">
+        <label class="f">Pasta na nuvem</label>
+        <div class="row">
+          <input type="text" value="${s.remote}" placeholder="${k}:" readonly>
+          <button class="btn ghost" onclick="openBrowse()">📁 Navegar</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Vazio (<code>${k}:</code>) = ${p.root}.</div>
+      </div>
+    </div>
+    <label class="f" style="margin-top:16px">Direção</label>
+    <div class="dirs">${dirs}</div>
+    <div class="warnbox ${s.dir!=='bisync'?'show':''}">⚠️ Modo one-way deleta arquivos no destino que não existem na origem.</div>
+    <div class="row" style="margin-top:18px">
+      <div style="flex:1">
+        <label class="f">Intervalo (min) — mínimo recomendado 5</label>
+        <input type="number" value="${s.interval}" min="5" onchange="state['${k}'].interval=this.value">
+      </div>
+      <div style="margin-left:auto; text-align:center">
+        <label class="f">Sync habilitado</label>
+        <label class="toggle"><input type="checkbox" ${s.enabled?'checked':''} onchange="state['${k}'].enabled=this.checked"><span></span></label>
+      </div>
+      <button class="btn" style="margin-left:20px; align-self:end" onclick="saveSettings(this,'${k}')">Salvar</button>
+    </div>
+    <div class="warnbox ${s.warned?'show':''}" id="warn-${k}">🔑 <code>${k}</code> não está autenticado — habilite apenas após conectar (aba "Conectar Nuvem").</div>
+    <div class="card cmdprev" style="margin-top:18px"><b style="color:var(--text)">Comando efetivo (preview)</b><br>
+      <code>${cmdFor(s.dir,local, s.remote||k+':')}</code></div>`;
+}
+function setDir(d){state[active].dir=d; renderPane();}
+function saveSettings(b,k){
+  const t=b.textContent; b.textContent='Salvando…';
+  setTimeout(()=>{b.textContent='✓ Salvo';
+    if(!state[k].connected && state[k].enabled){ state[k].enabled=false; state[k].warned=true; }
+    else state[k].warned=false;
+    renderPane(); setTimeout(()=>b.textContent=t,1200);},500);
+}
+
+/* ---------- connect (3 blocos empilhados) ---------- */
+function stepsHtml(k){
+  return `<ul class="connect-steps" id="steps-${k}" style="margin-top:12px; display:none">
+    <li><div class="ic">›</div><div>Inicia <code>rclone authorize ${k} --port 53682</code> no container</div></li>
+    <li><div class="ic">›</div><div>Abre o login do ${PROV[k].label} no navegador (callback → <code>localhost:53682</code>)</div></li>
+    <li><div class="ic">›</div><div>Você autoriza o acesso</div></li>
+    <li><div class="ic">›</div><div>Token capturado e gravado em <code>/data/rclone.conf</code> (seção <code>${k}</code>)</div></li>
+    <li><div class="ic">›</div><div>Valida com <code>rclone lsd ${k}:</code></div></li>
+  </ul>`;
+}
+function renderConnect(){
+  document.getElementById('connectCards').innerHTML = Object.entries(PROV).map(([k,p])=>{
+    const s=state[k];
+    return `<div class="pcard">
+      <div class="row">
+        <b style="flex:1">${p.icon} ${p.label} <span style="color:var(--muted);font-weight:400">(${k}:)</span></b>
+        <span class="badge ${s.connected?'ok':'off'}">${s.connected?'✓ conectado':'não conectado'}</span>
+        <button class="btn${s.connected?' ghost':''}" id="btn-${k}" onclick="startConnect('${k}',this)" ${s.connected?'disabled':''}>${s.connected?'Conectado':'🔗 Conectar'}</button>
+      </div>
+      ${k==='dropbox'?`<details class="adv" style="display:block;margin-top:10px"><summary>Avançado — client_id / client_secret próprios <span>(opcional; recomendado em uso pesado)</span></summary><div class="row" style="margin-top:8px"><input type="text" placeholder="client_id"><input type="password" placeholder="client_secret"></div></details>`:''}
+      ${stepsHtml(k)}
+      <div class="cok" id="ok-${k}" style="display:none;margin-top:10px;color:var(--ok);font-weight:600">✅ ${p.label} conectado.</div>
+    </div>`;
+  }).join('');
+}
+function startConnect(k,b){
+  b.disabled=true; b.textContent='Conectando…';
+  const steps=document.getElementById('steps-'+k); steps.style.display='block';
+  const lis=steps.querySelectorAll('li'); lis.forEach(l=>l.className='');
+  let i=0;
+  const tick=()=>{
+    if(i>0) lis[i-1].className='done';
+    if(i<lis.length){ lis[i].className='spin'; i++; setTimeout(tick,900); }
+    else {
+      state[k].connected=true; state[k].warned=false;
+      renderBadges(); renderConnect(); renderPane();
+    }
+  }; tick();
+}
+
+/* ---------- run now ---------- */
+function runNow(b){
+  const k=document.getElementById('runProv').value;
+  const tb=document.querySelector('#hist tbody');
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td>--:--:--</td><td>${k}</td><td>${state[k].dir}</td><td><span class="st run">rodando…</span></td><td>—</td><td>—</td>`;
+  tb.prepend(tr);
+  setTimeout(()=>{tr.children[3].innerHTML='<span class="st ok">ok</span>'; tr.children[4].textContent='2 ↑ · 1 ↓'; tr.children[5].textContent='8.4s';},1600);
+}
+
+/* ---------- browse modal (simulado) ---------- */
+const tree={
+  '': ['2026 Projetos','Backups','Fotos','GD-SYNC','Notas'],
+  '2026 Projetos':['Site Pessoal','App Mobile','Docs técnicos'],
+  'Backups':['2025','2026'], 'Fotos':['Eventos'], 'GD-SYNC':[], 'Notas':[]
+};
+let bPath='';
+function openBrowse(){
+  if(!state[active].connected){ alert(`Conecte "${PROV[active].label}" primeiro (aba "Conectar Nuvem").`); go('connect'); return; }
+  bPath='';
+  document.getElementById('mbTitle').textContent='Navegar em '+PROV[active].label;
+  renderBrowse(); document.getElementById('overlay').classList.add('show');
+}
+function closeBrowse(){document.getElementById('overlay').classList.remove('show');}
+function crumbs(){
+  const parts=bPath.split('/').filter(Boolean);
+  let h=`<a onclick="nav('')">raiz</a>`; let acc='';
+  parts.forEach(p=>{acc=acc?acc+'/'+p:p; h+=` / <a onclick="nav('${acc}')">${p}</a>`;});
+  document.getElementById('crumbs').innerHTML=h;
+}
+function children(path){ return tree[path]!==undefined?tree[path]:[]; }
+function nav(p){bPath=p; renderBrowse();}
+function renderBrowse(){
+  crumbs();
+  const k=active;
+  const fl=document.getElementById('folderlist');
+  fl.innerHTML=`<div class="fitem root-item" onclick="selectRoot()"><span class="ico">🏠</span><span class="nm">${PROV[k].root}</span></div>`;
+  children(bPath).forEach(k2=>{
+    const sub=bPath?bPath+'/'+k2:k2;
+    const has=tree[sub]!==undefined;
+    fl.insertAdjacentHTML('beforeend',
+      `<div class="fitem" onclick="${has?`nav('${sub}')`:`bPath='${sub}';renderBrowse()`}"><span class="ico">📁</span><span class="nm">${k2}</span><span class="gt">${has?'›':'abrir'}</span></div>`);
+  });
+  document.getElementById('btnSel').disabled=false;
+  document.getElementById('selLabel').textContent = bPath ? `→ ${k}:${bPath}` : PROV[k].root;
+}
+function setRemote(v){state[active].remote=v; renderPane();}
+function selectHere(){ setRemote(bPath?active+':'+bPath:active+':'); closeBrowse(); }
+function selectRoot(){ setRemote(active+':'); closeBrowse(); }
+document.getElementById('overlay').onclick=e=>{if(e.target.id==='overlay')closeBrowse();};
+
+/* ---------- init ---------- */
+renderBadges(); renderTabs(); renderPane(); renderConnect();
+</script>
+</body>
+</html>

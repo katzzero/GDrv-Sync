@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="view active" id="view-browse">
+    <div class="card">
+        <h2>Selecionar pasta — {{ provider }}</h2>
+        <div class="sub">
+            rclone lsd <code>{{ provider }}:{{ path }}</code> (somente pastas).
+        </div>
+
+        {% if not connected %}
+        <div style="color:var(--err);margin-bottom:12px">
+            ⚠️ {{ provider }} não está autenticado. Conecte-o primeiro em "Conectar Nuvem".
+        </div>
+        {% endif %}
+
+        {% if error %}
+        <div style="color:var(--err);margin-bottom:12px">{{ error }}</div>
+        {% endif %}
+
+        <!-- Breadcrumb clicável + opção raiz -->
+        <div class="crumbs" id="crumbs">
+            {% if path %}
+            <a href="?provider={{ provider }}">🏠 raiz ({{ provider }})</a>
+            {% set parts = path.split('/') %}
+            {% for i in range(parts|length) %}
+            / <a href="?provider={{ provider }}&path={{ parts[:loop.index]|join('/') }}">{{ parts[loop.index0] }}</a>
+            {% endfor %}
+            {% else %}
+            <span>🏠 raiz do provedor (<code>{{ provider }}:</code>)</span>
+            {% endif %}
+        </div>
+
+        <div class="folderlist" id="folderlist" data-folders='{{ folders | tojson | safe }}'>
+            {% if connected and folders is not none %}
+            <div class="fitem root-item" onclick="goRoot()">
+                <span class="ico">🏠</span><span class="nm">🏠 raiz ({{ provider }})</span>
+            </div>
+            {% for folder in folders %}
+            <div class="fitem" onclick="goFolder({{ loop.index0 }})">
+                <span class="ico">📁</span><span class="nm">{{ folder }}</span><span class="gt">›</span>
+            </div>
+            {% endfor %}
+            {% if folders|length == 0 %}
+            <div style="color:var(--muted);padding:12px">Nenhuma pasta encontrada.</div>
+            {% endif %}
+            {% elif not connected %}
+            <div style="color:var(--muted);padding:12px">Conecte a nuvem primeiro para listar pastas.</div>
+            {% else %}
+            <div style="color:var(--muted);padding:12px">Nenhuma pasta encontrada.</div>
+            {% endif %}
+        </div>
+
+        <div class="mfoot" style="margin-top:12px">
+            <button class="btn" onclick="selectHere()" id="btnSel" {% if not connected %}disabled{% endif %}>
+                Selecionar esta pasta
+            </button>
+            <span id="selLabel" style="margin-left:12px;color:var(--muted);font-size:12px">
+                {{ provider }}:{{ path }}
+            </span>
+        </div>
+    </div>
+</section>
+<script>
+const PROVIDER = {{ provider|tojson }};
+let currentPath = {{ path|tojson }};
+const FOLDERS = JSON.parse(document.getElementById('folderlist').dataset.folders || '[]');
+
+function goRoot(){ currentPath=''; navigate(); }
+function goFolder(idx){ currentPath = (currentPath ? currentPath + '/' : '') + FOLDERS[idx]; navigate(); }
+function navigate(){
+  const qs = new URLSearchParams({provider: PROVIDER});
+  if(currentPath) qs.set('path', currentPath);
+  window.location = '?' + qs.toString();
+}
+
+function selectHere(){
+    const remote = PROVIDER + ':' + currentPath;
+    // Notify opener (settings page) of the chosen remote, then close.
+    if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({gdSync: "browse-selected", provider: PROVIDER, remote: remote}, "*");
+        window.close();
+    } else {
+        // Fallback: tell settings via query param on the same origin (L4: use /, not /settings).
+        const url = new URL("/", window.location.origin);
+        url.searchParams.set("select_provider", PROVIDER);
+        url.searchParams.set("select_remote", remote);
+        window.location = url.toString();
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="view" id="view-connect">
+    <div class="card">
+        <h2>Conectar Nuvem</h2>
+        <div class="sub">OAuth no seu navegador — nenhum copiar/colar. Cada provedor conecta de forma independente.</div>
+        <div id="connectCards">
+            {% for provider in ['gdrive', 'dropbox', 'onedrive'] %}
+            <div class="pcard" id="card-{{ provider }}">
+                <div class="row">
+                    <b style="flex:1">{{ provider }}</b>
+                    <span class="badge {% if state[provider].connected %}ok{% else %}off{% endif %}"
+                          id="badge-{{ provider }}">{{ '✓ conectado' if state[provider].connected else 'não conectado' }}</span>
+                    <button class="btn{% if state[provider].connected %} ghost{% endif %}" id="btn-{{ provider }}"
+                            onclick="startConnect('{{ provider }}', this)"
+                            {% if state[provider].connected %}disabled{% endif %}>
+                        {{ 'Conectado' if state[provider].connected else '🔗 Conectar' }}
+                    </button>
+                </div>
+                {% if provider == 'dropbox' %}
+                <details class="adv show" style="margin-top:10px">
+                    <summary>Avançado — client_id / client_secret próprios <span>(opcional; recomendado em uso pesado)</span></summary>
+                    <div class="row" style="margin-top:8px">
+                        <input type="text" placeholder="client_id">
+                        <input type="password" placeholder="client_secret">
+                    </div>
+                    <div style="font-size:11px;color:var(--muted);margin-top:6px">Gravados somente em /data/rclone.conf (volume), nunca em settings.json.</div>
+                </details>
+                {% endif %}
+                <ul class="connect-steps" id="steps-{{ provider }}" style="margin-top:12px;display:none">
+                    <li><div class="ic">›</div><div>Inicia <code>rclone authorize {{ provider }} --port 53682</code> no container</div></li>
+                    <li><div class="ic">›</div><div>Abre o login do {{ provider }} no navegador (callback → <code>localhost:53682</code>)</div></li>
+                    <li><div class="ic">›</div><div>Você autoriza o acesso</div></li>
+                    <li><div class="ic">›</div><div>Token capturado e gravado em <code>/data/rclone.conf</code> (seção <code>{{ provider }}</code>)</div></li>
+                    <li><div class="ic">›</div><div>Valida com <code>rclone lsd {{ provider }}:</code></div></li>
+                </ul>
+                <div id="ok-{{ provider }}" style="display:none;margin-top:10px;color:var(--ok);font-weight:600">✅ {{ provider }} conectado.</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+<script>
+const PROVIDERS = ['gdrive', 'dropbox', 'onedrive'];
+let activeSessions = {}; // provider -> {phase:'idle'|'url'|'done'|'error'}
+let pollTimers = {};     // provider -> interval id
+let pollStart = {};      // provider -> start timestamp (ms)
+const POLL_INTERVAL = 1500;  // ms
+const POLL_TIMEOUT = 180000; // ms (~180s) then cancel
+
+async function startConnect(p, btn){
+  btn.disabled = true; btn.textContent = 'Conectando…';
+  const steps = document.getElementById('steps-'+p);
+  steps.style.display = 'block';
+  const lis = steps.querySelectorAll('li');
+  lis.forEach(li=>li.className='');
+
+  try{
+    const r = await fetch('/api/connect/start',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({provider: p})
+    });
+    const j = await r.json();
+    if(j.auth_url){
+      activeSessions[p] = {phase:'url'};
+      pollStart[p] = Date.now();
+      // Animate steps then open the auth URL.
+      let i = 0;
+      const tick = ()=>{
+        if(i>0) lis[i-1].className='done';
+        if(i<lis.length){ lis[i].className='spin'; i++; setTimeout(tick, 700); }
+        else {
+          // Open the OAuth URL in the user's browser (same tab navigation is fine for authorize).
+          window.location = j.auth_url;
+        }
+      }; tick();
+      // Begin polling for token persistence (user returns from the provider callback).
+      startPolling(p);
+    } else {
+      activeSessions[p] = {phase:'error'};
+      btn.disabled = false; btn.textContent = '🔗 Conectar';
+      alert(j.error || 'Não foi possível iniciar a autorização');
+    }
+  }catch(e){
+    btn.disabled = false; btn.textContent = '🔗 Conectar';
+    alert('Erro de rede ao iniciar a autorização');
+  }
+}
+
+function startPolling(p){
+  if(pollTimers[p]) return;
+  pollTimers[p] = setInterval(()=>{ pollConnect([p]); }, POLL_INTERVAL);
+}
+
+function stopPolling(p){
+  if(pollTimers[p]){ clearInterval(pollTimers[p]); pollTimers[p]=null; }
+  delete pollStart[p];
+}
+
+async function doCancel(p){
+  try{
+    await fetch('/api/connect/cancel',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({provider: p})
+    });
+  }catch(e){}
+  stopPolling(p);
+  const btn = document.getElementById('btn-'+p);
+  if(btn){ btn.disabled=false; btn.textContent='🔗 Conectar'; btn.className='btn'; }
+}
+
+// Poll connection status so the UI reflects when OAuth completes (user returns after callback).
+async function pollConnect(){
+  const now = Date.now();
+  // Only poll providers with an active OAuth flow (M6: no duplicate global interval).
+  const active = Object.keys(pollStart);
+  for(const p of active){
+    // Global timeout: cancel the session if it takes too long.
+    if(now - pollStart[p] > POLL_TIMEOUT){
+      doCancel(p);
+      const badge=document.getElementById('badge-'+p);
+      if(badge){ badge.className='badge off'; badge.textContent='não conectado'; }
+      alert(p+': a autorização excedeu o tempo limite e foi cancelada.');
+      continue;
+    }
+    try{
+      const r = await fetch(`/api/connect/status?provider=${encodeURIComponent(p)}`);
+      const j = await r.json();
+      const badge = document.getElementById('badge-'+p);
+      const btn = document.getElementById('btn-'+p);
+      const okDiv = document.getElementById('ok-'+p);
+      if(j.status === 'authorized' && j.connected){
+        stopPolling(p);
+        badge.className='badge ok'; badge.textContent='✓ conectado';
+        btn.textContent='Conectado'; btn.className='btn ghost'; btn.disabled=true;
+        okDiv.style.display='block';
+        document.getElementById('steps-'+p).querySelectorAll('li').forEach(li=>li.className='done');
+      } else if(j.status === 'error'){
+        stopPolling(p);
+        badge.className='badge off'; badge.textContent='não conectado';
+        if(btn){ btn.disabled=false; btn.textContent='🔗 Conectar'; btn.className='btn'; }
+        const detail = j.detail || 'erro na autorização';
+        const stdout = j.stdout ? '\n---\n'+j.stdout : '';
+        alert(p+': '+detail+stdout);
+      } else {
+        // waiting
+        badge.className='badge off'; badge.textContent='não conectado';
+        if(btn && !btn.disabled && btn.textContent!=='Conectando…'){ btn.textContent='🔗 Conectar'; btn.className='btn'; }
+      }
+    }catch(e){}
+  }
+}
+// No global setInterval: polling is started per-provider in startConnect (startPolling).
+</script>
+{% endblock %}
