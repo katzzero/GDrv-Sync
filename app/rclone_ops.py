@@ -297,10 +297,16 @@ def remote_is_empty(provider: str, folder: str) -> Tuple[Optional[bool], str]:
 
     Counts FILES AND SUBFOLDERS (lsd alone would miss files and falsely
     report a folder full of files as "empty").
-    Returns (is_empty, err): None if we could not tell.
+    Returns (is_empty, err):
+      True  -> folder exists and is empty
+      False -> folder exists and HAS content (adoption warning)
+      None  -> folder does not exist yet ("missing" in err) or check failed.
     """
     returncode, stdout, stderr = rclone_cmd(["lsjson", f"{provider}:{folder}"], timeout=60)
     if returncode != 0:
+        low = (stderr or "").lower()
+        if "directory not found" in low or "doesn't exist" in low or "not found" in low:
+            return None, "missing"
         return None, stderr
     try:
         return len(json.loads(stdout)) == 0, ""

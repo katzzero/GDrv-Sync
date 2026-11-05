@@ -471,7 +471,7 @@ async def api_use_dedicated(request: Request):
     if existed[0] is False:
         warning = (f"A pasta '{DEDICATED_FOLDER}' já existia e CONTEM dados. "
                    "Revise antes de habilitar Bidirecional ou Espelho — podem alterá-la/apagá-la.")
-    elif existed[0] is None:
+    elif existed[0] is None and existed[1] not in ("missing",):
         warning = (f"Não foi possível verificar se '{DEDICATED_FOLDER}' já tinha conteúdo. "
                    "Confira na UI antes de habilitar modos destrutivos.")
 

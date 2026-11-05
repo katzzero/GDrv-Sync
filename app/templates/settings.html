@@ -47,29 +47,7 @@ async function load(){
     state[p].enabled = provState[p]?.enabled ?? !!state[p].enabled;
     // default mirror false (never delete anything by default)
     if(state[p].mirror === undefined) state[p].mirror = false;
-});
-
-async function useDedicated(p, btn){
-  const warn = document.getElementById('ded-warn-'+p);
-  btn.disabled = true; btn.textContent='Criando…';
-  try{
-    const r = await fetch('/api/use-dedicated',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:p})});
-    const j = await r.json();
-    if(!r.ok || !j.ok){
-      if(warn){ warn.textContent = '⛔ '+(j.detail||j.error||'falhou'); warn.classList.add('show'); }
-      btn.disabled=false; btn.textContent=`📦 Criar/usar pasta dedicada "${DEDICATED}"`;
-      return;
-    }
-    state[p].remote = j.remote;
-    renderPane();
-    const w2 = document.getElementById('ded-warn-'+p);
-    if(w2){ w2.classList.add('show');
-      w2.textContent = j.warning ? ('⚠ '+j.warning) : `✅ Pasta dedicada criada/selecionada: ${j.remote}`; }
-  }catch(e){
-    if(warn){ warn.textContent = '⛔ Erro de rede: '+e; warn.classList.add('show'); }
-    btn.disabled=false; btn.textContent=`📦 Criar/usar pasta dedicada "${DEDICATED}"`;
-  }
-}
+  });
   renderTabs(); renderPane();
 }
 
@@ -352,6 +330,32 @@ window.addEventListener('message', ev=>{
   state[p].remote = remote;
   renderPane();
 });
+
+/* ---------- dedicated folder ---------- */
+async function useDedicated(p, btn){
+  const warn = document.getElementById('ded-warn-'+p);
+  btn.disabled = true; btn.textContent='Criando…';
+  try{
+    const ctrl = new AbortController();
+    const to = setTimeout(()=>ctrl.abort(), 60000);
+    const r = await fetch('/api/use-dedicated',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:p}),signal:ctrl.signal});
+    clearTimeout(to);
+    const j = await r.json();
+    if(!r.ok || !j.ok){
+      if(warn){ warn.textContent = '⛔ '+(j.detail||j.error||'falhou'); warn.classList.add('show'); }
+      btn.disabled=false; btn.textContent=`📦 Criar/usar pasta dedicada "${DEDICATED}"`;
+      return;
+    }
+    state[p].remote = j.remote;
+    renderPane();
+    const w2 = document.getElementById('ded-warn-'+p);
+    if(w2){ w2.classList.add('show');
+      w2.textContent = j.warning ? ('⚠ '+j.warning) : `✅ Pasta dedicada criada/selecionada: ${j.remote}`; }
+  }catch(e){
+    if(warn){ warn.textContent = '⛔ Erro de rede: '+e; warn.classList.add('show'); }
+    btn.disabled=false; btn.textContent=`📦 Criar/usar pasta dedicada "${DEDICATED}"`;
+  }
+}
 
 /* ---------- init ---------- */
 renderTabs(); load();
