@@ -1,4 +1,4 @@
-# PLANO — gd-sync: Docker + UI HTML para sync de pasta local ↔ nuvem
+# PLANO — gdrv-sync: Docker + UI HTML para sync de pasta local ↔ nuvem
 
 Status: atualizado 2026-11-04 (abas por provedor + pasta local por provedor + healthcheck v1)
 Escopo v1: **3 tarefas independentes, uma por provedor** (Google Drive, Dropbox, OneDrive Personal). Cada provedor tem **aba própria na UI** com suas configs e **pasta local fixa** dentro do volume montado: `/sync/Gdrive`, `/sync/Dropbox`, `/sync/Onedrive` (criadas automaticamente). Somente pastas na nuvem; **a raiz do provedor é selecionável**; intervalo fixo por tarefa; direção por tarefa.
@@ -7,7 +7,7 @@ Providers v1: **Google Drive (`gdrive`), Dropbox (`dropbox`), OneDrive Personal 
 ## 1. Arquitetura (1 container)
 
 ```
-┌─────────────────────────── container: gd-sync ───────────────────────────┐
+┌─────────────────────────── container: gdrv-sync ───────────────────────────┐
 │  FastAPI (uvicorn :8080)                                                 │
 │   ├─ UI HTML (Jinja2): Settings com ABAS por provedor / Status / Connect │
 │   ├─ /api/settings  → grava /data/settings.json (3 tarefas)              │
@@ -139,9 +139,9 @@ healthcheck:
 
 ```yaml
 services:
-  gd-sync:
+  gdrv-sync:
     build: .
-    container_name: gd-sync
+    container_name: gdrv-sync
     restart: unless-stopped
     ports:
       - "8080:8080"    # UI

@@ -1,1 +1,1 @@
-"""gd-sync application package."""
+"""gdrv-sync application package."""

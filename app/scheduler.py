@@ -32,7 +32,7 @@ from .rclone_ops import (
 from .providers import PROVIDERS, MAX_LOG_ENTRIES
 
 SETTINGS_PATH = Path(os.environ.get("DATA_DIR", "/data")) / "settings.json"
-log = logging.getLogger("gd-sync")
+log = logging.getLogger("gdrv-sync")
 
 
 class RunRecord:

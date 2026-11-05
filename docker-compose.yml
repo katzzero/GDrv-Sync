@@ -1,7 +1,7 @@
 services:
-  gd-sync:
+  gdrv-sync:
     build: .
-    container_name: gd-sync
+    container_name: gdrv-sync
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"   # UI (loopback only per PLANO §11)

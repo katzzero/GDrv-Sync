@@ -1,4 +1,6 @@
-# Estado da build — gd-sync v1 (2026-11-04)
+# Estado da build — gdrv-sync v1 (2026-11-04)
+
+**Nota histórica:** Este projeto iniciou como "gd-sync" e foi renomeado para "gdrv-sync" na tag v0.0.1.
 
 ## Status
 APROVADO pelo supervisor. Não commitado no git (aguardando decisão do usuário).
@@ -13,4 +15,4 @@ builder S1 (v1) → auditoria/correções builder S5 (120B) → fix do wiring de
 fluxo OAuth não testado end-to-end com contas reais (persistência do token testada offline com binário fake; nota honesta no README); ./data do host precisa ser gravável pelo uid 1000; provider habilitado no primeiro boot espera o 1º tick de reload (ou Run now); Box e OneDrive Business fora da v1 (documentados no PLANO).
 
 ## Verificação (reproduzível)
-python3 -m py_compile app/*.py; docker-compose config; docker build -t gd-sync .; docker-compose up -d; curl localhost:8080/healthz (shape PLANO §8); POST /api/settings com remote=/etc → 400; /browse?provider=evil → 400; remote "gdrive:" (raiz) → 200; /healthz responde em <10ms; 0 exceções no log; docker-compose down.
+python3 -m py_compile app/*.py; docker-compose config; docker build -t gdrv-sync .; docker-compose up -d; curl localhost:8080/healthz (shape PLANO §8); POST /api/settings com remote=/etc → 400; /browse?provider=evil → 400; remote "gdrive:" (raiz) → 200; /healthz responde em <10ms; 0 exceções no log; docker-compose down.

@@ -58,10 +58,10 @@ RUN mkdir -p /data/logs /data/rclone-state && touch /data/.gitkeep
 # typically writable by the host user on Linux/macOS (Colima/Docker Desktop pass
 # through the host uid).  NOTE: host ./data must allow uid 1000 writes; the app
 # will fail fast (ensure_dirs raises) if it cannot create /data subdirectories.
-RUN useradd -m -u 1000 -s /bin/sh gd-sync && \
-    chown -R gd-sync:gd-sync /data /app && \
+RUN useradd -m -u 1000 -s /bin/sh gdrv-sync && \
+    chown -R gdrv-sync:gdrv-sync /data /app && \
     chmod 755 /data
-USER gd-sync
+USER gdrv-sync
 
 EXPOSE 8080
 

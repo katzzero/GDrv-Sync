@@ -37,7 +37,7 @@ def ensure_dirs() -> None:
     subprocess failures.
     """
     import logging
-    log = logging.getLogger("gd-sync")
+    log = logging.getLogger("gdrv-sync")
     errors = []
     for d in (LOGS_DIR, RCLONE_STATE_DIR):
         try:

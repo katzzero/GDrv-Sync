@@ -24,7 +24,7 @@ from .rclone_ops import (
 from .scheduler import scheduler, SETTINGS_PATH
 
 app = FastAPI()
-log = logging.getLogger("gd-sync")
+log = logging.getLogger("gdrv-sync")
 
 # Templates path relative to this module file (works in-container /app/app and
 # locally when running from the repo root).

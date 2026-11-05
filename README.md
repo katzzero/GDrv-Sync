@@ -1,4 +1,4 @@
-# gd-sync
+# gdrv-sync
 
 FastAPI web UI + rclone subprocess scheduler in one Docker container that syncs
 local folders to cloud providers (Google Drive, Dropbox, OneDrive Personal).
@@ -24,7 +24,7 @@ export LOCAL_SYNC_DIR=./local
 
 ## Non-root container
 
-The image runs as a non-root user (`uid 1000`, user `gd-sync`) and writes to
+The image runs as a non-root user (`uid 1000`, user `gdrv-sync`) and writes to
 `/data`.  When bind-mounting `./data`, ensure the host directory allows writes
 by uid 1000 (Colima/Docker Desktop typically pass the host uid through).  If
 `/data` is not writable, the app fails fast on startup (see `ensure_dirs`).
@@ -137,3 +137,11 @@ Returns `503` when the rclone binary is missing/invalid **or** any provider with
 - No auth on the UI; the container is intended for localhost/private use.
 - Box, OneDrive Business/SharePoint, watch, filters, and multi-task-per-provider
   are out of scope (v1).
+
+## Licença / License
+
+Este projeto está licenciado sob a **AGPL-3.0-only** (GNU Affero General Public License v3.0).
+Veja o arquivo [LICENSE](LICENSE) para detalhes.
+
+O **rclone** é um programa separado, licenciado sob a **MIT License**, e é baixado
+durante o build da imagem Docker.

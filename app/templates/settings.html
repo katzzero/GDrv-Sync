@@ -161,7 +161,7 @@ function cmdFor(dir, local, remote){
 let browseWin = null;
 function openBrowse(p){
   const url = `/browse?provider=${encodeURIComponent(p)}`;
-  browseWin = window.open(url, 'gd-sync-browse', 'width=700,height=520');
+  browseWin = window.open(url, 'gdrv-sync-browse', 'width=700,height=520');
 }
 // Listen for selection from the browse popup. Keep remote exactly as sent ("gdrive:" for root).
 window.addEventListener('message', ev=>{

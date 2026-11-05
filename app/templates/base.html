@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>gd-sync</title>
+    <title>gdrv-sync</title>
     <style>
         :root{--bg:#0f1420;--panel:#171e2e;--panel2:#1d2537;--line:#2a3550;--text:#dbe3f4;--muted:#8b98b8;--accent:#4f8cff;--accent2:#3b6fe0;--ok:#3ecf8e;--warn:#f5c451;--err:#ff6b6b;--radius:12px}
         *{box-sizing:border-box;margin:0;padding:0}
@@ -103,7 +103,7 @@
 </head>
 <body>
 <header>
-    <div class="logo">gd<span>·</span>sync</div>
+    <div class="logo">gdrv<span>·</span>sync</div>
     <span id="provBadges">{{ prov_badges | safe }}</span>
     <span class="badge {% if healthz_ok %}ok{% else %}off{% endif %}" id="healthBadge" title="GET /healthz">container: {% if healthz_ok %}healthy{% else %}degraded{% endif %}</span>
     <div class="spacer"></div>
