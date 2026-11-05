@@ -56,42 +56,42 @@ by uid 1000 (Colima/Docker Desktop typically pass the host uid through).  If
 
 ## First Setup
 
-1. **Connect each provider** via the "Conectar Nuvem" tab:
+1. **Connect each provider** via the Cloud Connect tab ("Conectar Nuvem"):
    - Google Drive (gdrive) - works out of the box (rclone embedded client_id)
    - Dropbox (dropbox) - works out of the box; the embedded client is
-     rate-limited, so set your own client_id/client_secret under "Avançado" for
-     heavy use
+     rate-limited, so set your own client_id/client_secret under the Advanced
+     box ("Avançado") for heavy use
    - OneDrive (onedrive) - works out of the box (rclone embedded client_id)
 
    The flow opens the provider login in your browser and the callback lands on
    `localhost:53682` (published in compose). No copy/paste of tokens is needed.
 
-2. **Configure sync tasks** in the "Configurações" tab (one tab per provider):
-   - Pasta local fixa: `/sync/Gdrive`, `/sync/Dropbox`, `/sync/Onedrive`
-     (criada automaticamente dentro do volume `LOCAL_SYNC_DIR`)
-   - Escolha a pasta na nuvem (deixe vazio para a raiz do provedor)
-   - Direção: upload, download ou bisync
-   - Intervalo (mínimo 5 minutos)
-   - Habilite a tarefa
+2. **Configure sync tasks** in the Settings tab ("Configurações") — one tab per provider:
+   - Fixed local folder: `/sync/Gdrive`, `/sync/Dropbox`, `/sync/Onedrive`
+     (created automatically inside the `LOCAL_SYNC_DIR` volume)
+   - Pick the cloud folder (leave empty for the provider root)
+   - Direction: upload, download or bisync
+   - Interval (minimum 5 minutes)
+   - Enable the task
 
-   Uma tarefa só pode ser habilitada depois que o provedor estiver autenticado.
+   A task can only be enabled once its provider is authenticated.
 
-3. **Run now** via the "Status" tab para testar imediatamente.
+3. **Run now** via the Status tab to test immediately.
 
 ## Volumes
 
-| Host | Container | Conteúdo |
+| Host | Container | Contents |
 |------|-----------|----------|
 | `./data` | `/data` | rclone.conf, settings.json, logs, bisync-state |
-| `${LOCAL_SYNC_DIR:-./local}` | `/sync` | pastas locais: `/sync/Gdrive`, `/sync/Dropbox`, `/sync/Onedrive` |
+| `${LOCAL_SYNC_DIR:-./local}` | `/sync` | local folders: `/sync/Gdrive`, `/sync/Dropbox`, `/sync/Onedrive` |
 
 ## Provider Prerequisites
 
 | Provider | Out-of-box | Notes |
 |----------|------------|-------|
-| Google Drive | ✅ | Usa client_id embarcado do rclone |
-| Dropbox | ✅ | Client embarcado é rate-limited; use client_id/secret próprios em uso pesado (campo "Avançado") |
-| OneDrive | ✅ | Usa client_id embarcado do rdrive |
+| Google Drive | ✅ | Uses rclone's embedded client_id |
+| Dropbox | ✅ | Embedded client is rate-limited; use your own client_id/secret for heavy use (Advanced box) |
+| OneDrive | ✅ | Uses rclone's embedded client_id |
 
 ## Advanced Options
 
@@ -108,7 +108,7 @@ Documented as an upgrade; not wired into the v1 UI.
 
 ### Custom Client ID (Dropbox)
 
-In the Connect page, click "Avançado" to set your own client_id/client_secret.
+On the Connect page, open the Advanced box ("Avançado") to set your own client_id/client_secret.
 These are written only to `/data/rclone.conf` (the volume), never to
 `settings.json`.
 
@@ -163,10 +163,10 @@ Returns `503` when the rclone binary is missing/invalid **or** any provider with
 - Box, OneDrive Business/SharePoint, watch, filters, and multi-task-per-provider
   are out of scope (v1).
 
-## Licença / License
+## License
 
-Este projeto está licenciado sob a **AGPL-3.0-only** (GNU Affero General Public License v3.0).
-Veja o arquivo [LICENSE](LICENSE) para detalhes.
+This project is licensed under the **AGPL-3.0-only** (GNU Affero General Public License v3.0).
+See the [LICENSE](LICENSE) file for details.
 
-O **rclone** é um programa separado, licenciado sob a **MIT License**, e é baixado
-durante o build da imagem Docker.
+**rclone** is a separate program, licensed under the **MIT License**, downloaded
+at Docker image build time.
